@@ -58,6 +58,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || 'demos-release' }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || 'android' }}
         run: |
+          chmod +x gradlew
           VERSION_CODE=$((1000 + ${{ github.run_number }}))
           ./gradlew --no-daemon assembleRelease -PversionCode="$VERSION_CODE"
           apk="$(find app/build/outputs/apk/release -type f -iname '*universal*.apk' -print -quit)"
