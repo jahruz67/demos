@@ -1,0 +1,30 @@
+Demos uses Giac/Xcas for all computer algebra, entirely on the device.
+
+Giac/Xcas
+Copyright (C) 2000-2026 Bernard Parisse, Renee De Graeve and contributors.
+License: GNU General Public License version 3 or, at your option, any later version.
+Upstream: https://xcas.univ-grenoble-alpes.fr/
+Android binary: org.geogebra:giac-android:70507, unmodified.
+Binary SHA-256: 2e0fd53361e87f1db8d3acc353c370ea53a0688d9d0c7021a4c57c7758898433
+Binary URL: https://repo.geogebra.net/releases/org/geogebra/giac-android/70507/giac-android-70507.aar
+Corresponding source revision: 19a710aea9d528afa272ea582f3283f242e17af3
+https://github.com/geogebra/giac/tree/19a710aea9d528afa272ea582f3283f242e17af3
+
+The binary statically includes GNU GMP 6.3.0 and MPFR 4.2.1.
+GMP: Copyright Free Software Foundation and contributors; LGPL-3.0-or-later OR GPL-2.0-or-later.
+https://gmplib.org/
+MPFR: Copyright Free Software Foundation and contributors; LGPL-3.0-or-later.
+https://www.mpfr.org/
+
+The bundled libc++ runtime is distributed under the Apache License 2.0 with LLVM
+exceptions, with older portions under the University of Illinois/NCSA license.
+See LLVM-libcxx-LICENSE.txt.
+
+License texts are bundled alongside this notice. Source archives for the exact
+Giac revision, GMP and MPFR and upstream Android build scripts are supplied with
+the Demos source project under third_party/giac. The native binaries are not
+modified; Demos' small JNI declaration adapter is in its application source.
+
+Giac is provided WITHOUT ANY WARRANTY, including the implied warranties of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See GPL-3.0.txt.
+Demos is an independent application and is not affiliated with Desmos or HP.
