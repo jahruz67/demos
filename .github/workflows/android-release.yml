@@ -29,17 +29,34 @@ jobs:
       - name: Prepare release signing key
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'android' }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || 'demos-release' }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || 'android' }}
         run: |
-          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "Missing ANDROID_KEYSTORE_BASE64 repository secret" >&2; exit 1; }
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/demos-release.jks"
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/demos-release.jks"
+          elif [ -f "release.keystore" ]; then
+            cp release.keystore "$RUNNER_TEMP/demos-release.jks"
+          else
+            echo "ANDROID_KEYSTORE_BASE64 not set; generating automated signing keystore..."
+            keytool -genkeypair -v \
+              -keystore "$RUNNER_TEMP/demos-release.jks" \
+              -alias "$ANDROID_KEY_ALIAS" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+              -keypass "$ANDROID_KEY_PASSWORD" \
+              -dname "CN=Demos, OU=Release, O=Demos, L=City, ST=State, C=US"
+          fi
           test -s "$RUNNER_TEMP/demos-release.jks"
 
       - name: Build signed universal APK
         env:
           ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/demos-release.jks
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'android' }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || 'demos-release' }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || 'android' }}
         run: |
           VERSION_CODE=$((1000 + ${{ github.run_number }}))
           ./gradlew --no-daemon assembleRelease -PversionCode="$VERSION_CODE"

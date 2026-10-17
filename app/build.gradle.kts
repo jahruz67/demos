@@ -34,10 +34,11 @@ android {
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.create("release") {
-                storeFile = file(System.getenv("ANDROID_KEYSTORE_FILE") ?: "release.keystore")
-                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: ""
+                val keystoreEnv = System.getenv("ANDROID_KEYSTORE_FILE")
+                storeFile = if (keystoreEnv != null) file(keystoreEnv) else rootProject.file("release.keystore")
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "android"
                 keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: "demos-release"
-                keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: ""
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: "android"
             }
         }
     }
