@@ -42,7 +42,8 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || 'demos-release' }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          ./gradlew --no-daemon assembleRelease -PversionCode=${{ 1000 + github.run_number }}
+          VERSION_CODE=$((1000 + ${{ github.run_number }}))
+          ./gradlew --no-daemon assembleRelease -PversionCode="$VERSION_CODE"
           apk="$(find app/build/outputs/apk/release -type f -iname '*universal*.apk' -print -quit)"
           test -n "$apk" || { echo "Universal APK was not produced" >&2; exit 1; }
           cp "$apk" "$RUNNER_TEMP/Demos-universal.apk"
