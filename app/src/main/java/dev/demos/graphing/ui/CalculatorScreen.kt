@@ -211,7 +211,9 @@ fun CalculatorScreen(
         }
 
         BoxWithConstraints(Modifier.weight(1f)) {
-            val landscape = maxWidth >= 600.dp && (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE || maxWidth >= 840.dp)
+            val availableWidth = maxWidth
+            val availableHeight = maxHeight
+            val landscape = availableWidth >= 600.dp && (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE || availableWidth >= 840.dp)
             val graphPanel: @Composable (Modifier) -> Unit = { modifier ->
                 Box(modifier) {
                     graphState.SaveableStateProvider("graph") { graph(state.is3D, Modifier.fillMaxSize()) }
@@ -295,12 +297,12 @@ fun CalculatorScreen(
                 CalculatorLayout.Calculator -> Column(Modifier.fillMaxSize(), content = expressionPanel)
                 CalculatorLayout.Split -> if (landscape) {
                     Row(Modifier.fillMaxSize()) {
-                        Column(Modifier.width((maxWidth * .35f).coerceIn(260.dp, 420.dp)).fillMaxHeight(), content = expressionPanel)
+                        Column(Modifier.width((availableWidth * .35f).coerceIn(260.dp, 420.dp)).fillMaxHeight(), content = expressionPanel)
                         graphPanel(Modifier.weight(1f).fillMaxHeight())
                     }
                 } else {
                     Column(Modifier.fillMaxSize()) {
-                        graphPanel(Modifier.fillMaxWidth().height((maxHeight * if (keyboardVisible) .50f else .48f).coerceAtLeast(100.dp)))
+                        graphPanel(Modifier.fillMaxWidth().height((availableHeight * if (keyboardVisible) .50f else .48f).coerceAtLeast(100.dp)))
                         expressionPanel()
                     }
                 }

@@ -245,17 +245,21 @@ class MainActivity : ComponentActivity() {
                             exported = target
                             target.outputStream().use { output ->
                                 if (format == GraphExportFormat.PNG) check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
-                                else PdfDocument().use { pdf ->
-                                    val width = if (bitmap.width >= bitmap.height) 842 else 595
-                                    val height = if (bitmap.width >= bitmap.height) 595 else 842
-                                    val page = pdf.startPage(PdfDocument.PageInfo.Builder(width, height, 1).create())
-                                    page.canvas.drawColor(android.graphics.Color.WHITE)
-                                    val scale = minOf((width - 36f) / bitmap.width, (height - 36f) / bitmap.height)
-                                    val left = (width - bitmap.width * scale) / 2
-                                    val top = (height - bitmap.height * scale) / 2
-                                    page.canvas.drawBitmap(bitmap, null, RectF(left, top, left + bitmap.width * scale, top + bitmap.height * scale), Paint(Paint.FILTER_BITMAP_FLAG))
-                                    pdf.finishPage(page)
-                                    pdf.writeTo(output)
+                                else {
+                                    val pdf = PdfDocument()
+                                    try {
+                                        val width = if (bitmap.width >= bitmap.height) 842 else 595
+                                        val height = if (bitmap.width >= bitmap.height) 595 else 842
+                                        val page = pdf.startPage(PdfDocument.PageInfo.Builder(width, height, 1).create())
+                                        try {
+                                            page.canvas.drawColor(android.graphics.Color.WHITE)
+                                            val scale = minOf((width - 36f) / bitmap.width, (height - 36f) / bitmap.height)
+                                            val left = (width - bitmap.width * scale) / 2
+                                            val top = (height - bitmap.height * scale) / 2
+                                            page.canvas.drawBitmap(bitmap, null, RectF(left, top, left + bitmap.width * scale, top + bitmap.height * scale), Paint(Paint.FILTER_BITMAP_FLAG))
+                                        } finally { pdf.finishPage(page) }
+                                        pdf.writeTo(output)
+                                    } finally { pdf.close() }
                                 }
                             }
                         }
