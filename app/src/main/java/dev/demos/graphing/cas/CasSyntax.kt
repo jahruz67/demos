@@ -1,6 +1,6 @@
 package dev.demos.graphing.cas
 
-/** Input conveniences only. All mathematical operations are evaluated by Giac. */
+/** Normalizes symbolic input for Giac; basic arithmetic also has a local exact path. */
 object CasSyntax {
     data class Prepared(val expression: String, val indefiniteIntegral: Boolean, val regressionParameters: List<String> = emptyList())
 

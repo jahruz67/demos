@@ -13,6 +13,14 @@ data class ExpressionRow(
 
 data class SavedGraph(val id: String, val title: String, val updatedAt: Long)
 
+enum class CalculatorLayout { Split, Graph, Calculator }
+enum class GraphExportFormat(val extension: String, val mimeType: String) {
+    PNG("png", "image/png"), PDF("pdf", "application/pdf")
+}
+enum class TableFileFormat(val extension: String, val mimeType: String) {
+    CSV("csv", "text/csv"), TSV("tsv", "text/tab-separated-values"), JSON("json", "application/json")
+}
+
 data class SliderUi(
     val name: String,
     val value: Double,
@@ -49,6 +57,7 @@ data class CalculatorUiState(
     val precisionDigits: Int = 15,
     val complexMode: Boolean = false,
     val statusMessage: String? = null,
+    val layout: CalculatorLayout = CalculatorLayout.Split,
 )
 
 sealed interface CalculatorAction {
@@ -68,6 +77,10 @@ sealed interface CalculatorAction {
     data object ExportImage : CalculatorAction
     data object ExportDocument : CalculatorAction
     data object ImportDocument : CalculatorAction
+    data class ExportGraph(val format: GraphExportFormat) : CalculatorAction
+    data class ExportTable(val id: Long, val format: TableFileFormat) : CalculatorAction
+    data object ImportTable : CalculatorAction
+    data class SetLayout(val layout: CalculatorLayout) : CalculatorAction
     data class SetDegreeMode(val enabled: Boolean) : CalculatorAction
     data class SetGrid(val enabled: Boolean) : CalculatorAction
     data class SetAxes(val enabled: Boolean) : CalculatorAction

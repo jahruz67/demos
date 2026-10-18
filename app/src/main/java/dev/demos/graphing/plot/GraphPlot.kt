@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -33,20 +35,28 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import dev.demos.graphing.math.EvaluationContext
 import kotlin.math.*
 
 @Composable
-fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSettings=PlotSettings(),modifier:Modifier=Modifier) {
-    var center by remember {mutableStateOf(Offset.Zero)}
-    var viewWidth by remember {mutableDoubleStateOf(20.0)}
-    var viewHeightOverride by remember {mutableStateOf<Double?>(null)}
+fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSettings=PlotSettings(),modifier:Modifier=Modifier,showControls:Boolean=true) {
+    var center by rememberSaveable(stateSaver=Saver<Offset,List<Float>>(save={listOf(it.x,it.y)},restore={Offset(it[0],it[1])})) {mutableStateOf(Offset.Zero)}
+    var viewWidth by rememberSaveable {mutableDoubleStateOf(20.0)}
+    var viewHeightOverride by rememberSaveable {mutableStateOf<Double?>(null)}
+    var appliedBounds by rememberSaveable {mutableStateOf<List<Double?>?>(null)}
     var size by remember {mutableStateOf(IntSize(1,1))}
     var trace by remember {mutableStateOf<Offset?>(null)}
     val view=Viewport(center.x.toDouble(),center.y.toDouble(),viewWidth,viewHeightOverride?: (viewWidth*size.height/max(1,size.width)))
     var geometry by remember {mutableStateOf(Geometry2D())}
     var meshes by remember {mutableStateOf(emptyList<Mesh3D>())}
     var glView by remember {mutableStateOf<GraphSurfaceView?>(null)}
-    val cameraState=remember {GraphCameraState()}
+    val cameraState=rememberSaveable(saver=Saver<GraphCameraState,List<Double?>>(
+        save={listOf(it.yaw.toDouble(),it.pitch.toDouble(),it.distance.toDouble(),it.panX.toDouble(),it.panY.toDouble(),it.panZ.toDouble()) + (it.configuredBounds?:emptyList())},
+        restore={ values -> GraphCameraState().apply {
+            yaw=values[0]!!.toFloat();pitch=values[1]!!.toFloat();distance=values[2]!!.toFloat();panX=values[3]!!.toFloat();panY=values[4]!!.toFloat();panZ=values[5]!!.toFloat()
+            configuredBounds=if(values.size==12) values.drop(6) else null
+        } },
+    )) {GraphCameraState()}
     var inspectedPoint by remember {mutableStateOf<String?>(null)}
     var resetCounter by remember {mutableIntStateOf(0)}
     fun reset2D() {
@@ -56,17 +66,29 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
         viewWidth=xb?.let {it.second-it.first}?:20.0
         viewHeightOverride=yb?.let {it.second-it.first}
     }
-    LaunchedEffect(settings.xMin,settings.xMax,settings.yMin,settings.yMax) {reset2D()}
-    LaunchedEffect(expressions,settings,is3D,view) {
+    LaunchedEffect(settings.xMin,settings.xMax,settings.yMin,settings.yMax) {
+        val bounds=listOf(settings.xMin,settings.xMax,settings.yMin,settings.yMax)
+        if(appliedBounds!=bounds) {reset2D();appliedBounds=bounds}
+    }
+    val program by produceState<PlotProgram?>(null,expressions,settings) {
+        value=withContext(Dispatchers.Default) {PlotProgram.compile(expressions,settings)}
+    }
+    LaunchedEffect(program,is3D,view,size.width) {
+        val compiled=program?:return@LaunchedEffect
+        // Sampling mutates its context. Each pass owns a context even when a
+        // cancelled pass is still winding down on a different worker thread.
+        val sampling=compiled.copy(context=EvaluationContext(compiled.context.constants,compiled.context.functions,compiled.context.radians))
         if(is3D) {
+            geometry=Geometry2D()
             meshes=withContext(Dispatchers.Default) {
                 val context=currentCoroutineContext()
-                PlotGeometry.sample3D(PlotProgram.compile(expressions,settings),cancelled={!context.isActive})
+                PlotGeometry.sample3D(sampling,cancelled={!context.isActive})
             }
         } else {
+            meshes=emptyList()
             geometry=withContext(Dispatchers.Default) {
                 val context=currentCoroutineContext()
-                PlotGeometry.sample2D(PlotProgram.compile(expressions,settings),view,size.width.coerceIn(400,1800),cancelled={!context.isActive})
+                PlotGeometry.sample2D(sampling,view,size.width.coerceIn(400,1800),cancelled={!context.isActive})
             }
         }
     }
@@ -85,7 +107,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                 BasicText("y",style=TextStyle(color=Color(0xFF43813F),fontSize=12.sp))
                 BasicText("z",style=TextStyle(color=Color(0xFF3275B8),fontSize=12.sp))
             }
-            BasicText("Drag to rotate · Pinch to zoom",Modifier.align(Alignment.BottomCenter).padding(8.dp),style=TextStyle(color=Color(0xFF666666),fontSize=10.sp))
+            if(showControls) BasicText("Drag to rotate · Pinch to zoom",Modifier.align(Alignment.BottomCenter).padding(8.dp),style=TextStyle(color=Color(0xFF666666),fontSize=10.sp))
             inspectedPoint?.let {BasicText(it,Modifier.align(Alignment.TopStart).padding(8.dp).background(Color.White,RoundedCornerShape(5.dp)).border(1.dp,Color(0xFFD4D4D4),RoundedCornerShape(5.dp)).padding(8.dp),style=TextStyle(color=Color(0xFF333333),fontSize=16.sp))}
         } else {
             Canvas(Modifier.fillMaxSize()
@@ -188,13 +210,16 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                 }
             }
         }
-        Column(Modifier.align(Alignment.TopEnd).padding(top=49.dp,end=6.dp),verticalArrangement=Arrangement.spacedBy(5.dp)) {
+        if(showControls) Column(Modifier.align(Alignment.TopEnd).padding(top=49.dp,end=6.dp),verticalArrangement=Arrangement.spacedBy(5.dp)) {
             if(is3D || center!=Offset.Zero || abs(viewWidth-20.0)>1e-9 || viewHeightOverride!=null) {
                 PlotButton("⌂","Reset graph view") {reset2D();trace=null;inspectedPoint=null;resetCounter++}
             }
             if(is3D) {
                 PlotButton("+","Zoom in") {glView?.zoomBy(1.3f)}
                 PlotButton("−","Zoom out") {glView?.zoomBy(1/1.3f)}
+            } else {
+                PlotButton("+","Zoom in") {viewWidth=(viewWidth/1.3).coerceAtLeast(1e-7);viewHeightOverride=viewHeightOverride?.div(1.3);trace=null}
+                PlotButton("−","Zoom out") {viewWidth=(viewWidth*1.3).coerceAtMost(1e10);viewHeightOverride=viewHeightOverride?.times(1.3);trace=null}
             }
         }
     }

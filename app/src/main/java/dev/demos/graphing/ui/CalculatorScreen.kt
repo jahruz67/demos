@@ -6,6 +6,7 @@ package dev.demos.graphing.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.res.Configuration
 import android.speech.tts.TextToSpeech
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
@@ -26,6 +27,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +46,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
@@ -74,9 +78,11 @@ private val MathFont = FontFamily.Serif
 fun CalculatorScreen(
     state: CalculatorUiState,
     onAction: (CalculatorAction) -> Unit,
+    showGraphControls: Boolean = true,
+    onOpenLibrary: () -> Unit = {},
     graph: @Composable (is3D: Boolean, modifier: Modifier) -> Unit,
 ) {
-    var keyboardVisible by remember { mutableStateOf(true) }
+    var keyboardVisible by rememberSaveable { mutableStateOf(false) }
     var keyboardTab by remember { mutableStateOf("123") }
     var cursor by remember { mutableIntStateOf(state.rows.firstOrNull { it.id == state.activeId }?.text?.length ?: 0) }
     var sourceEditor by remember { mutableStateOf<ExpressionRow?>(null) }
@@ -87,6 +93,9 @@ fun CalculatorScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
+    var tableExportId by remember { mutableStateOf<Long?>(null) }
+    var showGraphExport by remember { mutableStateOf(false) }
+    val graphState = rememberSaveableStateHolder()
     var pendingInsertion by remember { mutableStateOf<String?>(null) }
     var pendingFromId by remember { mutableLongStateOf(-1L) }
     val context = LocalContext.current
@@ -99,6 +108,7 @@ fun CalculatorScreen(
     LaunchedEffect(state.activeId) { cursor = currentRow?.text?.length ?: 0 }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     LaunchedEffect(state.statusMessage) { state.statusMessage?.let { messages.showSnackbar(it) } }
+    BackHandler(enabled = !keyboardVisible && state.layout != CalculatorLayout.Split) { onAction(CalculatorAction.SetLayout(CalculatorLayout.Split)) }
     BackHandler(enabled = keyboardVisible && !showMenu && !showSave && !showLibrary && !showSettings && !showHelp && sourceEditor == null) { keyboardVisible = false }
 
     fun edit(insert: String, retreat: Int = 0) {
@@ -167,7 +177,7 @@ fun CalculatorScreen(
         Modifier.fillMaxSize().imePadding().background(Color.White)
             .focusRequester(focusRequester)
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown || sourceEditor != null || showSave || showSettings || showLibrary || showHelp || parseNoteText(currentRow?.text.orEmpty()) != null || parseFolderData(currentRow?.text.orEmpty()) != null) false
+                if (state.layout == CalculatorLayout.Graph || event.type != KeyEventType.KeyDown || sourceEditor != null || showSave || showSettings || showLibrary || showHelp || parseNoteText(currentRow?.text.orEmpty()) != null || parseFolderData(currentRow?.text.orEmpty()) != null) false
                 else when {
                     event.isCtrlPressed && event.key == Key.Z -> { onAction(if (event.isShiftPressed) CalculatorAction.Redo else CalculatorAction.Undo); true }
                     event.isCtrlPressed && event.key == Key.S -> { showSave = true; true }
@@ -183,33 +193,46 @@ fun CalculatorScreen(
                 }
             }.focusable()
     ) {
-        CalculatorHeader(state, { showLibrary = true }, { showSave = true }, {
+        if (state.layout == CalculatorLayout.Split) CalculatorHeader(state, { onOpenLibrary(); showLibrary = true }, { showSave = true }, {
             onAction(CalculatorAction.Toggle3D)
         }, { showMenu = true }, showMenu, { showMenu = false }) {
             DropdownMenuItem(text = { Text("New graph") }, onClick = { onAction(CalculatorAction.New); showMenu = false })
-            DropdownMenuItem(text = { Text("Open saved graph") }, onClick = { showLibrary = true; showMenu = false })
+            DropdownMenuItem(text = { Text("Open saved graph") }, onClick = { onOpenLibrary(); showLibrary = true; showMenu = false })
             DropdownMenuItem(text = { Text("Save graph") }, onClick = { showSave = true; showMenu = false })
             HorizontalDivider()
             DropdownMenuItem(text = { Text("Export graph file") }, onClick = { onAction(CalculatorAction.ExportDocument); showMenu = false })
             DropdownMenuItem(text = { Text("Import graph file") }, onClick = { onAction(CalculatorAction.ImportDocument); showMenu = false })
+            DropdownMenuItem(text = { Text("Export graph as PNG") }, onClick = { onAction(CalculatorAction.ExportGraph(GraphExportFormat.PNG)); showMenu = false })
+            DropdownMenuItem(text = { Text("Export graph as PDF") }, onClick = { onAction(CalculatorAction.ExportGraph(GraphExportFormat.PDF)); showMenu = false })
             DropdownMenuItem(text = { Text("Share graph image") }, onClick = { onAction(CalculatorAction.ExportImage); showMenu = false })
+            DropdownMenuItem(text = { Text("Import table (CSV, TSV, JSON)") }, onClick = { onAction(CalculatorAction.ImportTable); showMenu = false })
             HorizontalDivider()
             DropdownMenuItem(text = { Text("Calculator guide") }, onClick = { showHelp = true; showMenu = false })
         }
 
         BoxWithConstraints(Modifier.weight(1f)) {
-            val graphHeight = (maxHeight * if (keyboardVisible) .54f else .44f).coerceAtLeast(150.dp)
-            Column(Modifier.fillMaxSize()) {
-                Box(Modifier.fillMaxWidth().height(graphHeight).clip(RoundedCornerShape(0.dp))) {
-                    graph(state.is3D, Modifier.fillMaxSize())
-                    GraphTool(IconKind.Wrench, "Graph settings", Modifier.align(Alignment.TopEnd).padding(5.dp)) { showSettings = true }
-                    if (state.busy) LinearProgressIndicator(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp), color = Blue)
+            val landscape = maxWidth >= 600.dp && (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE || maxWidth >= 840.dp)
+            val graphPanel: @Composable (Modifier) -> Unit = { modifier ->
+                Box(modifier) {
+                    graphState.SaveableStateProvider("graph") { graph(state.is3D, Modifier.fillMaxSize()) }
+                    if (showGraphControls) {
+                        GraphTool(IconKind.Fullscreen, if (state.layout == CalculatorLayout.Graph) "Exit graph fullscreen" else "Graph fullscreen", Modifier.align(Alignment.TopStart).padding(5.dp)) {
+                            keyboardVisible = false
+                            onAction(CalculatorAction.SetLayout(if (state.layout == CalculatorLayout.Graph) CalculatorLayout.Split else CalculatorLayout.Graph))
+                        }
+                        GraphTool(IconKind.Wrench, "Graph settings", Modifier.align(Alignment.TopEnd).padding(5.dp)) { showSettings = true }
+                        if (state.layout == CalculatorLayout.Graph) GraphTool(IconKind.Export, "Export graph", Modifier.align(Alignment.BottomEnd).padding(6.dp)) { showGraphExport = true }
+                    }
                 }
+            }
+            val expressionPanel: @Composable ColumnScope.() -> Unit = {
                 ExpressionToolbar(
                     canUndo = state.canUndo, canRedo = state.canRedo, keyboardVisible = keyboardVisible,
                     onAdd = { showAddMenu = true }, onUndo = { onAction(CalculatorAction.Undo) },
                     onRedo = { onAction(CalculatorAction.Redo) }, onSettings = { showSettings = true },
                     onCollapse = { keyboardVisible = !keyboardVisible },
+                    fullscreen = state.layout == CalculatorLayout.Calculator,
+                    onFullscreen = { onAction(CalculatorAction.SetLayout(if (state.layout == CalculatorLayout.Calculator) CalculatorLayout.Split else CalculatorLayout.Calculator)) },
                 )
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -233,7 +256,7 @@ fun CalculatorScreen(
                                     onSelect = { onAction(CalculatorAction.SelectRow(row.id)); keyboardVisible = false },
                                     onDelete = { onAction(CalculatorAction.DeleteRow(row.id)) },
                                     onChange = { onAction(CalculatorAction.EditRow(row.id, encodeTableData(it))) }, onSource = { sourceEditor = row },
-                                    onVisibility = { onAction(CalculatorAction.ToggleVisibility(row.id)) }, onColor = { colorEditor = row })
+                                    onVisibility = { onAction(CalculatorAction.ToggleVisibility(row.id)) }, onColor = { colorEditor = row }, onExport = { tableExportId = row.id })
                                 note != null -> NoteExpressionItem(row, index + 1, row.id == state.activeId, note,
                                     onSelect = { onAction(CalculatorAction.SelectRow(row.id)); keyboardVisible = false },
                                     onDelete = { onAction(CalculatorAction.DeleteRow(row.id)) },
@@ -267,10 +290,25 @@ fun CalculatorScreen(
                     }
                 }
             }
+            when (state.layout) {
+                CalculatorLayout.Graph -> graphPanel(Modifier.fillMaxSize())
+                CalculatorLayout.Calculator -> Column(Modifier.fillMaxSize(), content = expressionPanel)
+                CalculatorLayout.Split -> if (landscape) {
+                    Row(Modifier.fillMaxSize()) {
+                        Column(Modifier.width((maxWidth * .35f).coerceIn(260.dp, 420.dp)).fillMaxHeight(), content = expressionPanel)
+                        graphPanel(Modifier.weight(1f).fillMaxHeight())
+                    }
+                } else {
+                    Column(Modifier.fillMaxSize()) {
+                        graphPanel(Modifier.fillMaxWidth().height((maxHeight * if (keyboardVisible) .50f else .48f).coerceAtLeast(100.dp)))
+                        expressionPanel()
+                    }
+                }
+            }
         }
 
         SnackbarHost(messages)
-        if (keyboardVisible) CalculatorKeypad(keyboardTab, onKey = ::key, onTemplate = { template, retreat -> edit(template, retreat) })
+        if (keyboardVisible && state.layout != CalculatorLayout.Graph) CalculatorKeypad(keyboardTab, onKey = ::key, onTemplate = { template, retreat -> edit(template, retreat) })
     }
 
     if (showAddMenu) AlertDialog(
@@ -278,6 +316,9 @@ fun CalculatorScreen(
         title = { Text("Add expression") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { onAction(CalculatorAction.ImportTable); showAddMenu = false }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Import table (CSV, TSV, JSON)", color = Blue, modifier = Modifier.fillMaxWidth())
+                }
                 listOf("Expression" to "", "Table" to "table([0,1,2],[0,1,4])", "Note" to "note(\"\")", "Folder" to "folder(\"Folder\",false)", "Indefinite integral" to "integrate(,x)", "Definite integral" to "integrate(,x,0,1)",
                     "Derivative" to "diff(,x)", "Solve equation" to "solve(,x)", "3D surface" to "z=x^2+y^2").forEach { (label, value) ->
                     TextButton(onClick = {
@@ -293,6 +334,24 @@ fun CalculatorScreen(
         },
         confirmButton = { TextButton(onClick = { showAddMenu = false }) { Text("Cancel") } },
     )
+
+    tableExportId?.let { id ->
+        AlertDialog(onDismissRequest = { tableExportId = null }, containerColor = Color.White,
+            title = { Text("Export this table") },
+            text = { Column {
+                TableFileFormat.entries.forEach { format ->
+                    TextButton(onClick = { onAction(CalculatorAction.ExportTable(id, format)); tableExportId = null }, modifier = Modifier.fillMaxWidth()) {
+                        Text("${format.name} (.${format.extension})", modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            } }, confirmButton = { TextButton(onClick = { tableExportId = null }) { Text("Cancel") } })
+    }
+    if (showGraphExport) AlertDialog(onDismissRequest = { showGraphExport = false }, containerColor = Color.White,
+        title = { Text("Export graph") }, text = { Column {
+            GraphExportFormat.entries.forEach { format ->
+                TextButton(onClick = { onAction(CalculatorAction.ExportGraph(format)); showGraphExport = false }, modifier = Modifier.fillMaxWidth()) { Text(format.name) }
+            }
+        } }, confirmButton = { TextButton(onClick = { showGraphExport = false }) { Text("Cancel") } })
 
     val insertion = pendingInsertion
     LaunchedEffect(state.activeId, insertion) {
@@ -344,7 +403,7 @@ private fun CalculatorHeader(state: CalculatorUiState, onOpen: () -> Unit, onSav
 }
 
 @Composable
-private fun ExpressionToolbar(canUndo: Boolean, canRedo: Boolean, keyboardVisible: Boolean, onAdd: () -> Unit, onUndo: () -> Unit, onRedo: () -> Unit, onSettings: () -> Unit, onCollapse: () -> Unit) {
+private fun ExpressionToolbar(canUndo: Boolean, canRedo: Boolean, keyboardVisible: Boolean, onAdd: () -> Unit, onUndo: () -> Unit, onRedo: () -> Unit, onSettings: () -> Unit, onCollapse: () -> Unit, fullscreen: Boolean, onFullscreen: () -> Unit) {
     Row(Modifier.fillMaxWidth().height(45.dp).background(Brush.verticalGradient(listOf(Color(0xFFFCFCFC), Color(0xFFECECEC))))
         .border(width = .5.dp, color = Border).padding(horizontal = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         ToolIcon(IconKind.Plus, "Add expression", onClick = onAdd)
@@ -353,7 +412,8 @@ private fun ExpressionToolbar(canUndo: Boolean, canRedo: Boolean, keyboardVisibl
         ToolIcon(IconKind.Redo, "Redo", if (canRedo) Muted else Color(0xFFC8C8C8), onRedo)
         Spacer(Modifier.weight(1f))
         ToolIcon(IconKind.Settings, "Settings", onClick = onSettings)
-        ToolIcon(if (keyboardVisible) IconKind.Collapse else IconKind.Expand, if (keyboardVisible) "Hide keyboard" else "Show keyboard", onClick = onCollapse)
+        ToolIcon(IconKind.Keyboard, if (keyboardVisible) "Hide keyboard" else "Show keyboard", if (keyboardVisible) Blue else Muted, onCollapse)
+        ToolIcon(IconKind.Fullscreen, if (fullscreen) "Exit calculator fullscreen" else "Calculator fullscreen", if (fullscreen) Blue else Muted, onFullscreen)
     }
 }
 
@@ -448,7 +508,7 @@ private fun SliderControl(slider: SliderUi, onAction: (CalculatorAction) -> Unit
 @Composable
 private fun TableExpressionItem(
     row: ExpressionRow, number: Int, tableNumber: Int, selected: Boolean, table: TableData,
-    onSelect: () -> Unit, onDelete: () -> Unit, onChange: (TableData) -> Unit, onSource: () -> Unit, onVisibility: () -> Unit, onColor: () -> Unit,
+    onSelect: () -> Unit, onDelete: () -> Unit, onChange: (TableData) -> Unit, onSource: () -> Unit, onVisibility: () -> Unit, onColor: () -> Unit, onExport: () -> Unit,
 ) {
     var editing by remember(row.id) { mutableStateOf<Pair<Int, Boolean>?>(null) }
     fun changeCell(index: Int, isX: Boolean, value: String) {
@@ -465,7 +525,10 @@ private fun TableExpressionItem(
         }
         Column(Modifier.weight(1f).padding(start = 9.dp, top = 7.dp, end = 5.dp, bottom = 6.dp)) {
             Row(Modifier.fillMaxWidth().height(29.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Table", fontSize = 12.sp, color = Muted, modifier = Modifier.weight(1f).combinedClickable(onClick = onSelect, onLongClick = onSource))
+                Text("Table $tableNumber", fontSize = 12.sp, color = Muted, modifier = Modifier.weight(1f).combinedClickable(onClick = onSelect, onLongClick = onSource))
+                IconButton(onClick = onExport, modifier = Modifier.size(32.dp).semantics { contentDescription = "Export table $tableNumber" }) {
+                    CalcIcon(IconKind.Export, Muted, Modifier.size(19.dp))
+                }
                 IconButton(onClick = onDelete, modifier = Modifier.size(25.dp)) { CalcIcon(IconKind.Delete, Color(0xFFCCCCCC), Modifier.size(20.dp)) }
             }
             Row(Modifier.fillMaxWidth().height(35.dp)) {
@@ -476,8 +539,8 @@ private fun TableExpressionItem(
                 }
                 Spacer(Modifier.width(25.dp))
             }
-            Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
-                repeat(table.size) { index ->
+            LazyColumn(Modifier.height(minOf(220, maxOf(34, table.size * 34)).dp)) {
+                items(table.size) { index ->
                     Row(Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
                         listOf(true, false).forEach { isX ->
                             val cell = (if (isX) table.x else table.y).getOrElse(index) { "" }
@@ -996,6 +1059,8 @@ private fun HelpSheet(onDismiss: () -> Unit) {
                 "Assumptions" to "assume(x>0)\nsimplify(sqrt(x^2))\npurge(x)",
                 "Matrices and complex numbers" to "det([[1,2],[3,4]])\ninv([[1,2],[3,4]])\n(2+3*i)^2\nsqrt(-1)",
                 "Tables and regressions" to "Use + → Table to enter points.\nlinear_regression(x_1,y_1)\npolynomial_regression(x_1,y_1,2)\ny_1~m*x_1+b",
+                "Import and export" to "Use the top menu to save a graph as PNG or PDF.\nUse + → Import table for two-column CSV, TSV, or JSON.\nCSV/TSV may include an x,y header. JSON accepts [[x,y],…], [{\"x\":1,\"y\":2},…], or x and y arrays.\nUse the export icon beside a table to save just that table.\nImports support up to 2,000 rows and 1 MB.",
+                "Fullscreen" to "Use the corner icon on the graph or calculator toolbar to expand that view. Your choice is remembered when you reopen the app.\nThe keyboard icon shows or hides the keypad. Back returns to the split view after hiding the keypad.",
             ).forEach { (heading, examples) ->
                 Text(heading, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 Text(examples, fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 20.sp,
@@ -1006,7 +1071,7 @@ private fun HelpSheet(onDismiss: () -> Unit) {
     }
 }
 
-private enum class IconKind { Folder, More, Wrench, Plus, Undo, Redo, Settings, Collapse, Expand, Delete, Backspace, Return, Speaker }
+private enum class IconKind { Folder, More, Wrench, Plus, Undo, Redo, Settings, Collapse, Expand, Delete, Backspace, Return, Speaker, Keyboard, Fullscreen, Export }
 
 @Composable
 private fun ToolIcon(kind: IconKind, description: String, color: Color = Muted, onClick: () -> Unit) {
@@ -1038,6 +1103,22 @@ private fun CalcIcon(kind: IconKind, color: Color, modifier: Modifier) {
             if (fill) drawPath(p, color) else drawPath(p, color, style = stroke)
         }
         when (kind) {
+            IconKind.Fullscreen -> {
+                path(listOf(.12f to .36f, .12f to .12f, .36f to .12f))
+                path(listOf(.64f to .12f, .88f to .12f, .88f to .36f))
+                path(listOf(.12f to .64f, .12f to .88f, .36f to .88f))
+                path(listOf(.64f to .88f, .88f to .88f, .88f to .64f))
+            }
+            IconKind.Keyboard -> {
+                path(listOf(.07f to .23f, .93f to .23f, .93f to .79f, .07f to .79f), true)
+                listOf(.36f, .5f).forEach { y -> listOf(.24f, .41f, .58f, .75f).forEach { x -> drawCircle(color, w * .025f, Offset(w*x,h*y)) } }
+                line(.3f, .66f, .7f, .66f, .06f)
+            }
+            IconKind.Export -> {
+                path(listOf(.18f to .58f, .18f to .86f, .82f to .86f, .82f to .58f))
+                line(.5f, .12f, .5f, .64f)
+                path(listOf(.28f to .34f, .5f to .12f, .72f to .34f))
+            }
             IconKind.Folder -> {
                 path(listOf(.08f to .8f, .08f to .2f, .36f to .2f, .47f to .30f, .86f to .30f))
                 path(listOf(.12f to .8f, .28f to .43f, .95f to .43f, .79f to .8f), true)

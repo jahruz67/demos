@@ -1,6 +1,7 @@
 package dev.demos.graphing
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.demos.graphing.cas.CasEngine
@@ -9,13 +10,13 @@ import dev.demos.graphing.cas.CasSyntax
 import dev.demos.graphing.data.GraphDocument
 import dev.demos.graphing.data.GraphRepository
 import dev.demos.graphing.data.StoredExpression
+import dev.demos.graphing.data.TableFiles
+import dev.demos.graphing.math.FastArithmetic
 import dev.demos.graphing.math.NumericCompiler
 import dev.demos.graphing.plot.PlotExpression
 import dev.demos.graphing.ui.*
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,19 +32,25 @@ import kotlin.math.max
 sealed interface CalculatorEffect {
     data class ExportDocument(val name: String, val contents: String) : CalculatorEffect
     data object ExportImage : CalculatorEffect
+    data class ExportGraph(val format: GraphExportFormat) : CalculatorEffect
+    data class ExportTable(val name: String, val contents: String, val format: TableFileFormat) : CalculatorEffect
+    data object ImportTable : CalculatorEffect
     data object ImportDocument : CalculatorEffect
 }
 
 class CalculatorViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = GraphRepository(application)
     private val engine = CasEngine(application)
-    private val _state = MutableStateFlow(CalculatorUiState(rows = listOf(newRow(1)), activeId = 1, busy = true))
+    private val preferences = application.getSharedPreferences("calculator-layout", Context.MODE_PRIVATE)
+    private val initialLayout = runCatching {
+        CalculatorLayout.valueOf(preferences.getString("layout", "Split") ?: "Split")
+    }.getOrDefault(CalculatorLayout.Split)
+    private val _state = MutableStateFlow(CalculatorUiState(rows = listOf(newRow(1)), activeId = 1, layout = initialLayout))
     val state = _state.asStateFlow()
     private val effectsChannel = Channel<CalculatorEffect>(Channel.BUFFERED)
     val effects = effectsChannel.receiveAsFlow()
     private var graphId = UUID.randomUUID().toString()
     private var nextId = 2L
-    private var engineReady = false
     private var evaluationJob: Job? = null
     private var recoveryJob: Job? = null
     private val animations = mutableMapOf<String, Job>()
@@ -55,33 +62,26 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private var integrationConstant = 0.0
     private val derivedPlots = mutableMapOf<Long, Pair<String, String>>()
 
+    private data class EvaluationKey(val source: String, val definitions: List<String>)
+    private val completed = mutableMapOf<Long, Pair<EvaluationKey, CasResult>>()
+    private val pending = mutableMapOf<Long, EvaluationKey>()
+    private val requested = mutableMapOf<Long, EvaluationKey>()
+    private var restorePending = true
+
     init {
+        // Restore only the current document. Saved graphs are loaded when the library opens.
+        // CasEngine binds lazily on the first expression that needs symbolic evaluation.
         viewModelScope.launch {
-            val recoveryDeferred = async(Dispatchers.IO) { repository.restoreRecovery() }
-            launch(Dispatchers.IO) { refreshSavedGraphs() }
-
-            val engineReadyDeferred = CompletableDeferred<Unit>()
-            runCatching {
-                engine.start {
-                    engineReadyDeferred.complete(Unit)
-                }
-            }.onFailure {
-                engineReadyDeferred.completeExceptionally(it)
-            }
-
-            val recovered = recoveryDeferred.await()
-            recovered?.let { applyDocument(it) }
-
-            runCatching {
-                engineReadyDeferred.await()
-                engineReady = true
-                _state.value = _state.value.copy(busy = false)
-                scheduleEvaluation()
-            }.onFailure {
-                showMessage("CAS could not start: ${it.message}")
-                _state.value = _state.value.copy(busy = false)
-            }
+            val recoveryGeneration = generation
+            val recovered = withContext(Dispatchers.IO) { repository.restoreRecovery() }
+            if (generation == recoveryGeneration && !_state.value.dirty && recovered != null) applyDocument(recovered)
+            restorePending = false
+            if (_state.value.dirty) changed() else scheduleEvaluation()
         }
+    }
+
+    fun loadLibrary() = viewModelScope.launch {
+        runCatching { refreshSavedGraphs() }.onFailure { showMessage("Could not load saved graphs: ${it.message}") }
     }
 
     fun onAction(action: CalculatorAction) {
@@ -115,14 +115,14 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 _state.value = _state.value.copy(rows = _state.value.rows.map {
                     if (it.id == action.id) it.copy(hidden = !it.hidden) else it
                 }, dirty = true)
-                changed()
+                changed(evaluate = false)
             }
             is CalculatorAction.SetColor -> {
                 rememberUndo()
                 _state.value = _state.value.copy(rows = _state.value.rows.map {
                     if (it.id == action.id) it.copy(color = action.color) else it
                 }, dirty = true)
-                changed()
+                changed(evaluate = false)
             }
             CalculatorAction.Undo -> if (undo.isNotEmpty()) {
                 redo.addLast(document())
@@ -137,7 +137,22 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             CalculatorAction.Toggle3D -> {
                 rememberUndo()
                 _state.value = _state.value.copy(is3D = !_state.value.is3D, dirty = true)
-                changed()
+                changed(evaluate = false)
+            }
+            is CalculatorAction.SetLayout -> {
+                _state.value = _state.value.copy(layout = action.layout)
+                preferences.edit().putString("layout", action.layout.name).apply()
+            }
+            is CalculatorAction.ExportGraph -> viewModelScope.launch { effectsChannel.send(CalculatorEffect.ExportGraph(action.format)) }
+            CalculatorAction.ImportTable -> viewModelScope.launch { effectsChannel.send(CalculatorEffect.ImportTable) }
+            is CalculatorAction.ExportTable -> {
+                val snapshot = _state.value
+                val table = snapshot.rows.firstOrNull { it.id == action.id }?.let { parseTableData(it.text) } ?: return
+                val index = snapshot.rows.takeWhile { it.id != action.id }.count { parseTableData(it.text) != null } + 1
+                viewModelScope.launch {
+                    val contents = withContext(Dispatchers.Default) { TableFiles.encode(table, action.format) }
+                    effectsChannel.send(CalculatorEffect.ExportTable("${safeFileName(snapshot.title)}-table-$index.${action.format.extension}", contents, action.format))
+                }
             }
             is CalculatorAction.Save -> save(action.title)
             is CalculatorAction.Open -> viewModelScope.launch {
@@ -167,13 +182,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 rememberUndo(); _state.value = _state.value.copy(degreeMode = action.enabled, dirty = true); changed()
             }
             is CalculatorAction.SetGrid -> {
-                rememberUndo(); _state.value = _state.value.copy(showGrid = action.enabled, dirty = true); changed()
+                rememberUndo(); _state.value = _state.value.copy(showGrid = action.enabled, dirty = true); changed(evaluate = false)
             }
             is CalculatorAction.SetAxes -> {
-                rememberUndo(); _state.value = _state.value.copy(showAxes = action.enabled, dirty = true); changed()
+                rememberUndo(); _state.value = _state.value.copy(showAxes = action.enabled, dirty = true); changed(evaluate = false)
             }
             is CalculatorAction.SetBounds -> {
-                rememberUndo(); _state.value = _state.value.copy(bounds = action.bounds, dirty = true); changed()
+                rememberUndo(); _state.value = _state.value.copy(bounds = action.bounds, dirty = true); changed(evaluate = false)
             }
             is CalculatorAction.SetPrecisionDigits -> {
                 rememberUndo(); _state.value = _state.value.copy(precisionDigits = action.digits.coerceIn(10, 1000), dirty = true); changed()
@@ -194,6 +209,24 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 applyDocument(imported, dirty = true); changed()
                 showMessage("Graph imported")
             }.onFailure { showMessage("Could not import graph: ${it.message}") }
+        }
+    }
+
+    fun importTable(contents: String) {
+        viewModelScope.launch {
+            runCatching {
+                val table = withContext(Dispatchers.Default) { TableFiles.decode(contents) }
+                rememberUndo()
+                val row = newRow(nextId++).copy(text = encodeTableData(table))
+                val rows = _state.value.rows
+                _state.value = _state.value.copy(
+                    rows = if (rows.size == 1 && rows[0].text.isBlank()) listOf(row) else rows + row,
+                    activeId = row.id, dirty = true,
+                    layout = if (_state.value.layout == CalculatorLayout.Graph) CalculatorLayout.Split else _state.value.layout,
+                )
+                changed()
+                showMessage("Imported ${table.size} table rows")
+            }.onFailure { showMessage("Could not import table: ${it.message}") }
         }
     }
 
@@ -218,14 +251,15 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         return fitted + current.sliders.associate { it.name to it.value } + ("C" to integrationConstant)
     }
 
-    private fun changed() {
+    private fun changed(evaluate: Boolean = true) {
         _state.value = _state.value.copy(canUndo = undo.isNotEmpty(), canRedo = redo.isNotEmpty())
         updateSliders()
-        scheduleEvaluation()
+        if (evaluate) scheduleEvaluation()
         recoveryJob?.cancel()
         val snapshot = document()
         recoveryJob = viewModelScope.launch {
             delay(450)
+            if (restorePending) return@launch
             runCatching { withContext(Dispatchers.IO) { repository.saveRecovery(snapshot) } }
                 .onFailure { showMessage("Could not recover graph automatically: ${it.message}") }
         }
@@ -233,38 +267,86 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
 
     private fun scheduleEvaluation() {
         evaluationJob?.cancel()
-        if (!engineReady) return
-        engine.cancelPending()
-        _state.value = _state.value.copy(rows = _state.value.rows.map { it.copy(isEvaluating = false) })
+        requested.clear()
         val currentGeneration = ++generation
+        val snapshot = _state.value
         evaluationJob = viewModelScope.launch {
-            delay(280)
-            val snapshot = _state.value
             val evaluations = withContext(Dispatchers.Default) {
                 val tableDefinitions = snapshot.rows.mapNotNull { parseTableData(it.text) }.flatMapIndexed { index, table ->
                     val number = index + 1
                     val valid = (0 until table.size).filter { table.x.getOrNull(it)?.isNotBlank() == true && table.y.getOrNull(it)?.isNotBlank() == true }
                     listOf("x_$number:=[${valid.joinToString(",") { table.x[it] }}]", "y_$number:=[${valid.joinToString(",") { table.y[it] }}]")
                 }
-                snapshot.rows.filter { it.text.isNotBlank() && parseTableData(it.text) == null && parseNoteText(it.text) == null }.map { row ->
-                    val definitions = listOf("angle_radian:=${if (snapshot.degreeMode) 0 else 1}",
-                        "complex_mode:=${if (snapshot.complexMode) 1 else 0}", "Digits:=${snapshot.precisionDigits}") +
-                        tableDefinitions + snapshot.rows.filter { it.id != row.id }.mapNotNull { definition(it.text) } +
-                        snapshot.rows.filter { it.id != row.id }.mapNotNull { CasSyntax.regressionDefinition(it.text) }
-                    row to definitions
+                val definitions = snapshot.rows.mapNotNull { row -> definition(row.text)?.let { row.id to it } }
+                val regressions = snapshot.rows.mapNotNull { row -> CasSyntax.regressionDefinition(row.text)?.let { row.id to it } }
+                snapshot.rows.filter {
+                    it.text.isNotBlank() && parseTableData(it.text) == null && parseNoteText(it.text) == null && parseFolderData(it.text) == null
+                }.map { row ->
+                    val fast = FastArithmetic.evaluate(row.text, snapshot.precisionDigits) ?: incompleteResult(row.text)
+                    val context = if (fast != null) listOf("Digits:=${snapshot.precisionDigits}") else
+                        listOf("angle_radian:=${if (snapshot.degreeMode) 0 else 1}",
+                            "complex_mode:=${if (snapshot.complexMode) 1 else 0}", "Digits:=${snapshot.precisionDigits}") +
+                            tableDefinitions + definitions.filter { it.first != row.id }.map { it.second } +
+                            regressions.filter { it.first != row.id }.map { it.second }
+                    Triple(row, EvaluationKey(row.text, context), fast)
                 }
             }
             if (currentGeneration != generation) return@launch
-            evaluations.forEach { (row, definitions) ->
-                _state.value = _state.value.copy(rows = _state.value.rows.map { if (it.id == row.id) it.copy(isEvaluating = true) else it })
-                engine.evaluate("row:${row.id}", row.text, definitions) { result ->
-                    viewModelScope.launch {
-                        if (currentGeneration != generation) return@launch
+            requested.putAll(evaluations.associate { it.first.id to it.second })
+            pending.toMap().forEach { (id, key) ->
+                if (requested[id] != key) { pending.remove(id); engine.cancel("row:$id") }
+            }
+            val ids = snapshot.rows.map { it.id }.toSet()
+            completed.keys.retainAll(ids)
+            derivedPlots.keys.retainAll(ids)
+            _state.value = _state.value.copy(rows = _state.value.rows.map {
+                if (pending[it.id] == null) it.copy(isEvaluating = false) else it
+            })
+            val symbolic = mutableListOf<Pair<ExpressionRow, EvaluationKey>>()
+            evaluations.forEach { (row, key, fast) ->
+                val cached = completed[row.id]?.takeIf { it.first == key }?.second
+                when {
+                    fast != null || cached != null -> {
+                        val result = fast ?: cached!!
+                        completed[row.id] = key to result
                         applyResult(row.id, row.text, result)
+                    }
+                    pending[row.id] == key -> Unit
+                    else -> symbolic += row to key
+                }
+            }
+            // Only symbolic work is debounced. Ordinary arithmetic has already returned.
+            if (symbolic.isNotEmpty()) delay(80)
+            if (currentGeneration != generation) return@launch
+            symbolic.forEach { (row, key) ->
+                pending[row.id] = key
+                engine.evaluate("row:${row.id}", row.text, key.definitions) { result ->
+                    if (pending[row.id] == key) {
+                        pending.remove(row.id)
+                        completed[row.id] = key to result
+                        if (requested[row.id] == key) applyResult(row.id, row.text, result)
                     }
                 }
             }
+            // Avoid flashing a spinner for calculations that finish within a frame or two.
+            if (symbolic.isNotEmpty()) delay(150)
+            if (currentGeneration == generation) _state.value = _state.value.copy(rows = _state.value.rows.map {
+                it.copy(isEvaluating = pending[it.id] != null)
+            })
         }
+    }
+
+    /** Do not load Giac for a half-typed operator or an unfinished template. */
+    private fun incompleteResult(source: String): CasResult? {
+        val text = source.trim()
+        if (text.lastOrNull()?.let { it in "+-*/^=,×÷−" } == true ||
+            Regex("[(,]\\s*[,)]").containsMatchIn(text)) return CasResult(source, "")
+        var depth = 0
+        for (c in text) {
+            if (c == '(' || c == '[' || c == '{') depth++
+            if (c == ')' || c == ']' || c == '}') depth--
+        }
+        return if (depth > 0) CasResult(source, "") else null
     }
 
     private fun applyResult(id: Long, source: String, result: CasResult) {
@@ -274,6 +356,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         else derivedPlots.remove(id)
         val unchanged = compact(exact) == compact(source) || compact(exact) == compact(source.replace("=", ":="))
         val displayed = if (unchanged && result.error == null) "" else exact
+        if (row.result == displayed && row.approximate == result.approximate && row.error == result.error && !row.isEvaluating) return
         _state.value = _state.value.copy(rows = _state.value.rows.map {
             if (it.id == row.id) it.copy(result = displayed, approximate = result.approximate, error = result.error, isEvaluating = false) else it
         })
@@ -331,6 +414,8 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
 
     private fun applyDocument(doc: GraphDocument, dirty: Boolean = false) {
         generation++
+        engine.cancelPending()
+        completed.clear(); pending.clear(); requested.clear()
         derivedPlots.clear()
         graphId = doc.id
         integrationConstant = doc.parameters["C"] ?: 0.0

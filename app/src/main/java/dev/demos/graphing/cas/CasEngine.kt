@@ -37,6 +37,9 @@ class CasEngine(context: Context) {
     private var session = 0L
     private var reconnectAfter = 0L
     private var reconnectScheduled = false
+    private val releaseIdle = Runnable {
+        if (active == null && queue.isEmpty() && readyCallbacks.isEmpty()) disconnect(kill = true)
+    }
 
     private data class Request(
         val id: Long, val key: String, val input: String,
@@ -138,8 +141,11 @@ class CasEngine(context: Context) {
     fun cancelPending() = onMain {
         queue.clear()
         latest.clear()
+        val wasRunning = active != null
         active = null
-        disconnect(kill = true)
+        // An idle service can be reused; restarting it for each keystroke adds
+        // process startup, native library loading, and the reconnect delay.
+        if (wasRunning) disconnect(kill = true)
     }
 
     fun close() = onMain {
@@ -187,7 +193,12 @@ class CasEngine(context: Context) {
     }
 
     private fun dispatch() {
-        if (closed || active != null || queue.isEmpty()) return
+        main.removeCallbacks(releaseIdle)
+        if (closed || active != null) return
+        if (queue.isEmpty()) {
+            if (bound && ready) main.postDelayed(releaseIdle, 30_000L)
+            return
+        }
         if (!ready) { connect(); return }
         val request = queue.removeFirst()
         if (latest[request.key] != request.id) { dispatch(); return }
@@ -236,6 +247,7 @@ class CasEngine(context: Context) {
     }
 
     private fun disconnect(kill: Boolean) {
+        main.removeCallbacks(releaseIdle)
         requestTimeout?.let(main::removeCallbacks)
         requestTimeout = null
         startupTimeout?.let(main::removeCallbacks)
