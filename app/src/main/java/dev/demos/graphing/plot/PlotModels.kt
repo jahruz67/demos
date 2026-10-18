@@ -38,7 +38,10 @@ data class PlotProgram(val relations:List<PlotRelation>,val context:EvaluationCo
             val relations=ArrayList<PlotRelation>()
             val assignments=ArrayList<Pair<String,CompiledExpression>>()
             for(expression in expressions) {
-                val s=NumericCompiler.normalize(expression.text).trim()
+                // Incomplete LaTeX is normal while typing; keep the other plots alive.
+                val s=try {NumericCompiler.normalize(expression.text).trim()}
+                    catch (_:IllegalArgumentException) {continue}
+                    catch (_:IllegalStateException) {continue}
                 if(s.isEmpty()) continue
                 try {
                     val tableArguments=when {

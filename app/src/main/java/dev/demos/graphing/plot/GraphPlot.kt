@@ -5,8 +5,12 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculateCentroidSize
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -21,6 +25,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
@@ -92,6 +97,8 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
             }
         }
     }
+    val latestGeometry by rememberUpdatedState(geometry)
+    val latestView by rememberUpdatedState(view)
     val density=LocalDensity.current.density
     val labelPaint=remember {Paint(Paint.ANTI_ALIAS_FLAG).apply {color=android.graphics.Color.BLACK}}
     Box(modifier.background(Color.White).onSizeChanged {size=it}) {
@@ -112,34 +119,65 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
         } else {
             Canvas(Modifier.fillMaxSize()
                 .pointerInput(Unit) {
-                    detectTransformGestures {centroid,pan,zoom,_ ->
-                        val oldWidth=viewWidth
-                        val newWidth=(oldWidth/zoom).coerceIn(1e-7,1e10)
-                        val oldHeight=viewHeightOverride?: (oldWidth*size.height/max(1,size.width))
-                        val factorX=oldWidth/max(1,size.width)
-                        val factorY=oldHeight/max(1,size.height)
-                        val cx=(centroid.x-size.width/2.0)*factorX
-                        val cy=(size.height/2.0-centroid.y)*factorY
-                        center=Offset((center.x+cx*(1-newWidth/oldWidth)-pan.x*factorX).toFloat(),(center.y+cy*(1-newWidth/oldWidth)+pan.y*factorY).toFloat())
-                        viewWidth=newWidth
-                        if(viewHeightOverride!=null) viewHeightOverride=oldHeight*newWidth/oldWidth
-                        trace=null
-                    }
-                }
-                .pointerInput(geometry,view,size) {
-                    detectTapGestures(onTap={tap ->
-                        var best=Double.POSITIVE_INFINITY;var point:Offset?=null
-                        for(line in geometry.strokes) {
-                            val a=line.coordinates
-                            for(i in a.indices step 2) {
-                                val px=(a[i]-view.left)/view.width*size.width
-                                val py=(view.top-a[i+1])/view.height*size.height
-                                val distance=hypot(px-tap.x,py-tap.y)
-                                if(distance<best && distance<36*density) {best=distance;point=Offset(a[i],a[i+1])}
+                    // Keep a single recognizer alive throughout a drag/pinch.
+                    // Viewport and sampled geometry updates must not cancel it.
+                    awaitEachGesture {
+                        val down=awaitFirstDown(requireUnconsumed=false)
+                        var pastSlop=false
+                        var cancelled=false
+                        var multiplePointers=false
+                        var accumulatedPan=Offset.Zero
+                        var accumulatedZoom=1f
+                        var pressed=true
+                        while(pressed) {
+                            val event=awaitPointerEvent()
+                            pressed=event.changes.any {it.pressed}
+                            if(event.changes.any {it.isConsumed}) {cancelled=true;break}
+                            multiplePointers=multiplePointers || event.changes.count {it.pressed || it.previousPressed}>1
+                            val zoom=event.calculateZoom()
+                            val pan=event.calculatePan()
+                            accumulatedPan+=pan
+                            accumulatedZoom*=zoom
+                            if(!pastSlop) {
+                                val zoomMotion=abs(1-accumulatedZoom)*event.calculateCentroidSize(useCurrent=false)
+                                pastSlop=zoomMotion>viewConfiguration.touchSlop || accumulatedPan.getDistance()>viewConfiguration.touchSlop
                             }
+                            if(pastSlop && (zoom!=1f || pan!=Offset.Zero)) {
+                                val centroid=event.calculateCentroid(useCurrent=false)
+                                val oldWidth=viewWidth
+                                val newWidth=(oldWidth/zoom).coerceIn(1e-7,1e10)
+                                val pixelWidth=max(1,size.width)
+                                val pixelHeight=max(1,size.height)
+                                val oldHeight=viewHeightOverride?: (oldWidth*pixelHeight/pixelWidth)
+                                val newHeight=oldHeight*newWidth/oldWidth
+                                // Anchor the zoom under the fingers and translate using
+                                // the new scale so simultaneous pan/zoom does not drift.
+                                center=Offset(
+                                    (center.x+(centroid.x-pixelWidth/2.0)*(oldWidth-newWidth)/pixelWidth-pan.x*newWidth/pixelWidth).toFloat(),
+                                    (center.y+(pixelHeight/2.0-centroid.y)*(oldHeight-newHeight)/pixelHeight+pan.y*newHeight/pixelHeight).toFloat(),
+                                )
+                                viewWidth=newWidth
+                                if(viewHeightOverride!=null) viewHeightOverride=newHeight
+                                trace=null
+                            }
+                            if(pastSlop) event.changes.forEach {if(it.positionChanged()) it.consume()}
                         }
-                        trace=point
-                    })
+                        if(!pastSlop && !cancelled && !multiplePointers) {
+                            val currentView=latestView
+                            var best=Double.POSITIVE_INFINITY
+                            var point:Offset?=null
+                            for(line in latestGeometry.strokes) {
+                                val coordinates=line.coordinates
+                                for(i in coordinates.indices step 2) {
+                                    val px=(coordinates[i]-currentView.left)/currentView.width*size.width
+                                    val py=(currentView.top-coordinates[i+1])/currentView.height*size.height
+                                    val distance=hypot(px-down.position.x,py-down.position.y)
+                                    if(distance<best && distance<36*density) {best=distance;point=Offset(coordinates[i],coordinates[i+1])}
+                                }
+                            }
+                            trace=point
+                        }
+                    }
                 }
             ) {
                 fun sx(x:Double)=((x-view.left)/view.width*size.width).toFloat()
@@ -210,7 +248,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                 }
             }
         }
-        if(showControls) Column(Modifier.align(Alignment.TopEnd).padding(top=49.dp,end=6.dp),verticalArrangement=Arrangement.spacedBy(5.dp)) {
+        if(showControls) Column(Modifier.align(Alignment.TopEnd).padding(top=60.dp,end=6.dp),verticalArrangement=Arrangement.spacedBy(5.dp)) {
             if(is3D || center!=Offset.Zero || abs(viewWidth-20.0)>1e-9 || viewHeightOverride!=null) {
                 PlotButton("⌂","Reset graph view") {reset2D();trace=null;inspectedPoint=null;resetCounter++}
             }
@@ -225,7 +263,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     }
 }
 @Composable private fun PlotButton(label:String,description:String,onClick:()->Unit) {
-    Box(Modifier.size(36.dp).background(Color(0xFFF0F0F0),RoundedCornerShape(5.dp)).border(1.dp,Color(0xFFD4D4D4),RoundedCornerShape(5.dp)).semantics {contentDescription=description}.clickable(onClick=onClick),contentAlignment=Alignment.Center) {
+    Box(Modifier.size(48.dp).background(Color(0xFFF0F0F0),RoundedCornerShape(5.dp)).border(1.dp,Color(0xFFD4D4D4),RoundedCornerShape(5.dp)).semantics {contentDescription=description}.clickable(onClick=onClick),contentAlignment=Alignment.Center) {
         BasicText(label,style=TextStyle(color=Color(0xFF626262),fontSize=25.sp))
     }
 }

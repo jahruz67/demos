@@ -58,6 +58,7 @@ data class CalculatorUiState(
     val complexMode: Boolean = false,
     val statusMessage: String? = null,
     val layout: CalculatorLayout = CalculatorLayout.Split,
+    val keyboardVisible: Boolean = true,
 )
 
 sealed interface CalculatorAction {
@@ -81,6 +82,7 @@ sealed interface CalculatorAction {
     data class ExportTable(val id: Long, val format: TableFileFormat) : CalculatorAction
     data object ImportTable : CalculatorAction
     data class SetLayout(val layout: CalculatorLayout) : CalculatorAction
+    data class SetKeyboardVisible(val visible: Boolean) : CalculatorAction
     data class SetDegreeMode(val enabled: Boolean) : CalculatorAction
     data class SetGrid(val enabled: Boolean) : CalculatorAction
     data class SetAxes(val enabled: Boolean) : CalculatorAction

@@ -1,5 +1,7 @@
 package dev.demos.graphing.cas
 
+import dev.demos.graphing.math.LatexSyntax
+
 /** Normalizes symbolic input for Giac; basic arithmetic also has a local exact path. */
 object CasSyntax {
     data class Prepared(val expression: String, val indefiniteIntegral: Boolean, val regressionParameters: List<String> = emptyList())
@@ -9,7 +11,7 @@ object CasSyntax {
     }
 
     fun prepare(input: String): Prepared {
-        var text = input.trim()
+        var text = LatexSyntax.normalize(input).trim()
             .replace("\\left", "").replace("\\right", "")
             .replace("\\cdot", "*").replace("\\times", "*")
             .replace("\\pi", "pi").replace("\\infty", "infinity")

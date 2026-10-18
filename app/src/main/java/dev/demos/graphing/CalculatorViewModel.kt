@@ -45,7 +45,10 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private val initialLayout = runCatching {
         CalculatorLayout.valueOf(preferences.getString("layout", "Split") ?: "Split")
     }.getOrDefault(CalculatorLayout.Split)
-    private val _state = MutableStateFlow(CalculatorUiState(rows = listOf(newRow(1)), activeId = 1, layout = initialLayout))
+    private val _state = MutableStateFlow(CalculatorUiState(
+        rows = listOf(newRow(1)), activeId = 1, layout = initialLayout,
+        keyboardVisible = preferences.getBoolean("keyboard-visible", initialLayout != CalculatorLayout.Graph),
+    ))
     val state = _state.asStateFlow()
     private val effectsChannel = Channel<CalculatorEffect>(Channel.BUFFERED)
     val effects = effectsChannel.receiveAsFlow()
@@ -140,8 +143,18 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 changed(evaluate = false)
             }
             is CalculatorAction.SetLayout -> {
-                _state.value = _state.value.copy(layout = action.layout)
-                preferences.edit().putString("layout", action.layout.name).apply()
+                val showKeyboard = when (action.layout) {
+                    CalculatorLayout.Calculator -> true
+                    CalculatorLayout.Graph -> false
+                    CalculatorLayout.Split -> _state.value.keyboardVisible
+                }
+                _state.value = _state.value.copy(layout = action.layout, keyboardVisible = showKeyboard)
+                preferences.edit().putString("layout", action.layout.name).putBoolean("keyboard-visible", showKeyboard).apply()
+            }
+            is CalculatorAction.SetKeyboardVisible -> {
+                if (_state.value.keyboardVisible == action.visible) return
+                _state.value = _state.value.copy(keyboardVisible = action.visible)
+                preferences.edit().putBoolean("keyboard-visible", action.visible).apply()
             }
             is CalculatorAction.ExportGraph -> viewModelScope.launch { effectsChannel.send(CalculatorEffect.ExportGraph(action.format)) }
             CalculatorAction.ImportTable -> viewModelScope.launch { effectsChannel.send(CalculatorEffect.ImportTable) }

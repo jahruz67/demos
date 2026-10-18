@@ -12,11 +12,12 @@ object NumericCompiler {
     }
 
     fun normalize(source: String): String {
-        var s = source.trim().replace("−", "-").replace("–", "-").replace("×", "*")
+        var s = LatexSyntax.normalize(source).trim().replace("−", "-").replace("–", "-").replace("×", "*")
             .replace("·", "*").replace("÷", "/").replace("π", "pi").replace("θ", "theta")
             .replace("∞", "Infinity").replace("\\left", "").replace("\\right", "")
             .replace("\\cdot", "*").replace("\\times", "*")
         s = s.replace(functionPrefixRegex, "$1")
+        s = s.replace(Regex("\\binfinity\\b"), "Infinity")
         val superscripts = mapOf('⁰' to '0','¹' to '1','²' to '2','³' to '3','⁴' to '4','⁵' to '5','⁶' to '6','⁷' to '7','⁸' to '8','⁹' to '9','⁻' to '-')
         val out = StringBuilder()
         var inPower = false

@@ -64,12 +64,17 @@ internal class GraphSurfaceView(context:Context,camera:GraphCameraState=GraphCam
                     val x=(event.getX(0)+event.getX(1))/2;val y=(event.getY(0)+event.getY(1))/2
                     val scale=graphRenderer.distance/max(1,height)*0.7f
                     val yaw=graphRenderer.yaw*PI.toFloat()/180
-                    graphRenderer.panX+=(cos(yaw)*(x-lastX)-sin(yaw)*(y-lastY))*scale
-                    graphRenderer.panY+=(-sin(yaw)*(x-lastX)-cos(yaw)*(y-lastY))*scale
+                    val pitch=graphRenderer.pitch*PI.toFloat()/180
+                    val dx=x-lastX;val dy=y-lastY
+                    // Move the camera target opposite screen-space dragging so
+                    // the surface follows the fingers at every orbit angle.
+                    graphRenderer.panX+=(-cos(yaw)*dx-sin(yaw)*sin(pitch)*dy)*scale
+                    graphRenderer.panY+=(-sin(yaw)*dx+cos(yaw)*sin(pitch)*dy)*scale
+                    graphRenderer.panZ+=cos(pitch)*dy*scale
                     lastX=x;lastY=y
                 } else {
                     val dx=event.x-lastX;val dy=event.y-lastY
-                    graphRenderer.yaw+=dx*0.45f
+                    graphRenderer.yaw-=dx*0.45f
                     graphRenderer.pitch=(graphRenderer.pitch+dy*0.4f).coerceIn(-85f,85f)
                     lastX=event.x;lastY=event.y
                     if(hypot(event.x-downX,event.y-downY)>8) transformed=true
