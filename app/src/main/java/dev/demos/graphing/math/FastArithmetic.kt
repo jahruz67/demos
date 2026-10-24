@@ -8,9 +8,11 @@ import java.math.MathContext
 /** Bounded, exact arithmetic without starting the native symbolic process. */
 object FastArithmetic {
     fun evaluate(source: String, digits: Int): CasResult? {
-        if (source.length > 512 || source.any { it !in "0123456789.+-*/^() \t\n\r−×÷" }) return null
+        if (source.length > 512) return null
+        val normalized = runCatching { LatexSyntax.normalize(source) }.getOrNull() ?: return null
+        if (normalized.any { it !in "0123456789.+-*/^() \t\n\r−×÷" }) return null
         return runCatching {
-            val value = Parser(source.replace('−', '-').replace('×', '*').replace('÷', '/')).parse()
+            val value = Parser(normalized.replace('−', '-').replace('×', '*').replace('÷', '/')).parse()
             val exact = if (value.d == BigInteger.ONE) value.n.toString() else "${value.n}/${value.d}"
             val approximate = if (value.d == BigInteger.ONE) "" else
                 BigDecimal(value.n).divide(BigDecimal(value.d), MathContext(digits.coerceIn(10, 1000)))

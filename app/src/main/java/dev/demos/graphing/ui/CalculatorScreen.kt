@@ -16,13 +16,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -41,14 +41,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.contentDescription
@@ -70,12 +68,20 @@ import androidx.compose.ui.unit.sp
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.roundToInt
+import dev.demos.graphing.plot.PlotExpression
+import dev.demos.graphing.plot.PlotProgram
+import dev.demos.graphing.plot.PlotSettings
 
 private val Blue = Color(0xFF2D70DA)
 private val Header = Color(0xFF292929)
 private val Muted = Color(0xFF656565)
 private val Border = Color(0xFFD3D3D3)
 private val MathFont = FontFamily.Serif
+
+// Focusing an equation must never reposition the user's worksheet.
+private val ManualScrollSpec = object : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float) = 0f
+}
 
 /** Native, offline calculator shell. The graph and document state remain owned by the app. */
 @Composable
@@ -109,6 +115,11 @@ fun CalculatorScreen(
     val focusRequester = remember { FocusRequester() }
     val messages = remember { SnackbarHostState() }
     val currentRow = state.rows.firstOrNull { it.id == state.activeId }
+    val plotSources = state.rows.map { PlotExpression(it.id, it.text, it.color) }
+    val plotParameters = state.sliders.associate { it.name to it.value }
+    val graphableIds = remember(plotSources, plotParameters) {
+        PlotProgram.compile(plotSources, PlotSettings(parameters = plotParameters)).relations.map { it.id }.toSet()
+    }
 
     LaunchedEffect(state.rows.map { it.id }) {
         editorValues.keys.retainAll(state.rows.map { it.id }.toSet())
@@ -139,14 +150,12 @@ fun CalculatorScreen(
     fun erase() {
         val row = state.rows.firstOrNull { it.id == state.activeId } ?: return
         val value = editorValue(row)
-        if (!value.selection.collapsed) { edit(""); return }
-        val at = value.selection.end.coerceIn(0, row.text.length)
-        if (at > 0) updateInput(row, TextFieldValue(row.text.removeRange(at - 1, at), TextRange(at - 1)))
+        updateInput(row, MathInputRules.backspace(value), complete = false)
     }
     fun moveCursor(delta: Int) {
         val row = state.rows.firstOrNull { it.id == state.activeId } ?: return
         val value = editorValue(row)
-        editorValues[row.id] = value.copy(selection = TextRange((value.selection.end + delta).coerceIn(0, row.text.length)))
+        editorValues[row.id] = MathInputRules.move(value, delta)
     }
     fun addRow() {
         state.rows.lastOrNull { parseFolderData(it.text) != null }?.let { row ->
@@ -165,6 +174,7 @@ fun CalculatorScreen(
             "a²" -> edit("^2")
             "aᵇ" -> edit("^{}", 1)
             "√" -> edit("sqrt()", 1)
+            "()" -> edit("()", 1)
             "|a|" -> edit("abs()", 1)
             "π" -> edit("pi")
             "×" -> edit("*")
@@ -263,52 +273,50 @@ fun CalculatorScreen(
                 )
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-                    LaunchedEffect(state.rows.size) {
-                        val index = state.rows.indexOfFirst { it.id == state.activeId }
-                        if (index >= 0) listState.animateScrollToItem(index)
-                    }
-                    LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                        itemsIndexed(state.rows, key = { _, row -> row.id }) { index, row ->
-                            val table = remember(row.text) { parseTableData(row.text) }
-                            val note = remember(row.text) { parseNoteText(row.text) }
-                            val folder = remember(row.text) { parseFolderData(row.text) }
-                            val enclosingFolder = state.rows.take(index).lastOrNull { parseFolderData(it.text) != null }?.let { parseFolderData(it.text) }
-                            if (folder == null && enclosingFolder?.collapsed == true) return@itemsIndexed
-                            when {
-                                folder != null -> FolderExpressionItem(index + 1, row.id == state.activeId, folder,
-                                    onSelect = { onAction(CalculatorAction.SelectRow(row.id)); setKeyboardVisible(false) },
-                                    onDelete = { onAction(CalculatorAction.DeleteRow(row.id)) },
-                                    onChange = { onAction(CalculatorAction.EditRow(row.id, encodeFolderData(it))) })
-                                table != null -> TableExpressionItem(row, index + 1, state.rows.take(index + 1).count { parseTableData(it.text) != null }, row.id == state.activeId, table,
-                                    onSelect = { onAction(CalculatorAction.SelectRow(row.id)); setKeyboardVisible(false) },
-                                    onDelete = { onAction(CalculatorAction.DeleteRow(row.id)) },
-                                    onChange = { onAction(CalculatorAction.EditRow(row.id, encodeTableData(it))) },
-                                    onVisibility = { onAction(CalculatorAction.ToggleVisibility(row.id)) }, onColor = { colorEditor = row }, onExport = { tableExportId = row.id })
-                                note != null -> NoteExpressionItem(row, index + 1, row.id == state.activeId, note,
-                                    onSelect = { onAction(CalculatorAction.SelectRow(row.id)); setKeyboardVisible(false) },
-                                    onDelete = { onAction(CalculatorAction.DeleteRow(row.id)) },
-                                    onChange = { onAction(CalculatorAction.EditRow(row.id, encodeNoteText(it))) })
-                                else -> ExpressionItem(row, index + 1, row.id == state.activeId, editorValue(row),
-                                    onInput = { value -> updateInput(row, value) },
-                                    onInputFocus = { focused ->
-                                        textInputFocused = focused
-                                        if (focused) onAction(CalculatorAction.SelectRow(row.id))
-                                    },
-                                    onSelect = { onAction(CalculatorAction.SelectRow(row.id)); setKeyboardVisible(true) },
-                                    onDelete = { onAction(CalculatorAction.DeleteRow(row.id)) },
-                                    onVisibility = { onAction(CalculatorAction.ToggleVisibility(row.id)) }, onColor = { colorEditor = row },
-                                )
+                    CompositionLocalProvider(LocalBringIntoViewSpec provides ManualScrollSpec) {
+                        LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                            itemsIndexed(state.rows, key = { _, row -> row.id }) { index, row ->
+                                val table = remember(row.text) { parseTableData(row.text) }
+                                val note = remember(row.text) { parseNoteText(row.text) }
+                                val folder = remember(row.text) { parseFolderData(row.text) }
+                                val enclosingFolder = state.rows.take(index).lastOrNull { parseFolderData(it.text) != null }?.let { parseFolderData(it.text) }
+                                if (folder == null && enclosingFolder?.collapsed == true) return@itemsIndexed
+                                when {
+                                    folder != null -> FolderExpressionItem(index + 1, row.id == state.activeId, folder,
+                                        onSelect = { onAction(CalculatorAction.SelectRow(row.id)); setKeyboardVisible(false) },
+                                        onDelete = { onAction(CalculatorAction.DeleteRow(row.id)) },
+                                        onChange = { onAction(CalculatorAction.EditRow(row.id, encodeFolderData(it))) })
+                                    table != null -> TableExpressionItem(row, index + 1, state.rows.take(index + 1).count { parseTableData(it.text) != null }, row.id == state.activeId, table,
+                                        onSelect = { onAction(CalculatorAction.SelectRow(row.id)); setKeyboardVisible(false) },
+                                        onDelete = { onAction(CalculatorAction.DeleteRow(row.id)) },
+                                        onChange = { onAction(CalculatorAction.EditRow(row.id, encodeTableData(it))) },
+                                        onVisibility = { onAction(CalculatorAction.ToggleVisibility(row.id)) }, onColor = { colorEditor = row }, onExport = { tableExportId = row.id })
+                                    note != null -> NoteExpressionItem(row, index + 1, row.id == state.activeId, note,
+                                        onSelect = { onAction(CalculatorAction.SelectRow(row.id)); setKeyboardVisible(false) },
+                                        onDelete = { onAction(CalculatorAction.DeleteRow(row.id)) },
+                                        onChange = { onAction(CalculatorAction.EditRow(row.id, encodeNoteText(it))) })
+                                    else -> ExpressionItem(row, index + 1, row.id == state.activeId, editorValue(row), row.id in graphableIds,
+                                        onInput = { value -> updateInput(row, value) },
+                                        onInputFocus = { focused ->
+                                            textInputFocused = focused
+                                            if (focused) onAction(CalculatorAction.SelectRow(row.id))
+                                        },
+                                        onSelect = { onAction(CalculatorAction.SelectRow(row.id)); setKeyboardVisible(true) },
+                                        onDelete = { onAction(CalculatorAction.DeleteRow(row.id)) },
+                                        onVisibility = { onAction(CalculatorAction.ToggleVisibility(row.id)) }, onColor = { colorEditor = row },
+                                    )
+                                }
+                                state.sliders.filter {
+                                    row.text.trim().startsWith(it.name + "=") || row.text.trim().startsWith(it.name + " =") ||
+                                        (it.name == "C" && row.id == state.rows.firstOrNull { expression -> expression.result.contains(Regex("\\bC\\b")) }?.id)
+                                }
+                                    .forEach { slider -> SliderControl(slider, onAction) }
                             }
-                            state.sliders.filter {
-                                row.text.trim().startsWith(it.name + "=") || row.text.trim().startsWith(it.name + " =") ||
-                                    (it.name == "C" && row.id == state.rows.firstOrNull { expression -> expression.result.contains(Regex("\\bC\\b")) }?.id)
-                            }
-                                .forEach { slider -> SliderControl(slider, onAction) }
-                        }
-                        item {
-                            Row(Modifier.fillMaxWidth().height(48.dp).clickable { addRow(); setKeyboardVisible(true) }) {
-                                Box(Modifier.width(35.dp).fillMaxHeight().background(Brush.verticalGradient(listOf(Color(0xFFEEEEEE), Color.White)))) {
-                                    Text("${state.rows.size + 1}", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(start = 3.dp, top = 3.dp))
+                            item {
+                                Row(Modifier.fillMaxWidth().height(48.dp).clickable { addRow(); setKeyboardVisible(true) }) {
+                                    Box(Modifier.width(35.dp).fillMaxHeight().background(Brush.verticalGradient(listOf(Color(0xFFEEEEEE), Color.White)))) {
+                                        Text("${state.rows.size + 1}", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(start = 3.dp, top = 3.dp))
+                                    }
                                 }
                             }
                         }
@@ -334,7 +342,7 @@ fun CalculatorScreen(
         }
 
         SnackbarHost(messages)
-        if (keyboardVisible && state.layout != CalculatorLayout.Graph) CalculatorKeypad(keyboardTab, onKey = ::key, onTemplate = { template, retreat -> edit(template, retreat) })
+        if (keyboardVisible && state.layout != CalculatorLayout.Graph) CalculatorKeypad(keyboardTab, state.layout, state.is3D, onKey = ::key, onTemplate = { template, retreat -> edit(template, retreat) })
     }
 
     if (showAddMenu) AlertDialog(
@@ -441,7 +449,7 @@ private fun ExpressionToolbar(canUndo: Boolean, canRedo: Boolean, keyboardVisibl
 }
 
 @Composable
-private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, value: TextFieldValue, onInput: (TextFieldValue) -> Unit, onInputFocus: (Boolean) -> Unit, onSelect: () -> Unit, onDelete: () -> Unit, onVisibility: () -> Unit, onColor: () -> Unit) {
+private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, value: TextFieldValue, graphable: Boolean, onInput: (TextFieldValue) -> Unit, onInputFocus: (Boolean) -> Unit, onSelect: () -> Unit, onDelete: () -> Unit, onVisibility: () -> Unit, onColor: () -> Unit) {
     var decimal by remember(row.id) { mutableStateOf(false) }
     val context = LocalContext.current
     val hasResult = row.result.isNotBlank()
@@ -458,7 +466,7 @@ private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, v
                         drawLine(Color.White, Offset(size.width / 2, size.height * .30f), Offset(size.width / 2, size.height * .64f), 2.dp.toPx())
                         drawCircle(Color.White, 1.dp.toPx(), Offset(size.width / 2, size.height * .82f))
                     }
-                } else if (row.text.isNotEmpty() && (!hasResult || row.result.any { it in "xyz" })) {
+                } else if (graphable) {
                     Canvas(Modifier.padding(top = 5.dp).size(27.dp).combinedClickable(onClick = onVisibility, onLongClick = onColor)
                         .semantics { contentDescription = if (row.hidden) "Show expression $number on graph; hold to change color" else "Hide expression $number on graph; hold to change color" }) {
                         drawCircle(if (row.hidden) Color.White else Color(row.color))
@@ -474,34 +482,7 @@ private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, v
             }
             Column(Modifier.weight(1f).padding(start = 16.dp, top = 10.dp, bottom = if (hasResult || row.error != null) 4.dp else 10.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    run {
-                        val inputFocus = remember(row.id) { FocusRequester() }
-                        LaunchedEffect(selected) { if (selected) inputFocus.requestFocus() }
-                        BasicTextField(
-                            value = value,
-                            visualTransformation = LatexVisualTransformation,
-                            onValueChange = onInput,
-                            singleLine = true,
-                            textStyle = TextStyle(fontFamily = MathFont, fontSize = 26.sp, color = Color(0xFF202020)),
-                            cursorBrush = SolidColor(Blue),
-                            keyboardOptions = KeyboardOptions(showKeyboardOnFocus = false),
-                            modifier = Modifier.weight(1f).heightIn(min = 48.dp).focusRequester(inputFocus)
-                                .onFocusChanged { onInputFocus(it.isFocused) }
-                                .pointerInput(Unit) {
-                                    awaitEachGesture {
-                                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                                        onSelect()
-                                    }
-                                }
-                                .semantics { contentDescription = "Equation $number" },
-                            decorationBox = { field ->
-                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                                    if (row.text.isEmpty()) Text("Type an expression", color = Color(0xFFAAAAAA), fontSize = 18.sp)
-                                    field()
-                                }
-                            },
-                        )
-                    }
+                    MathEditor(value, selected, number, Modifier.weight(1f), onInput, onInputFocus, onSelect)
                     IconButton(onClick = onDelete, modifier = Modifier.size(44.dp).semantics { contentDescription = "Delete expression $number" }) {
                         CalcIcon(IconKind.Delete, Color(0xFFBBBBBB), Modifier.size(21.dp))
                     }
@@ -694,10 +675,17 @@ private fun formatNumber(n: Double) = if (n == n.toLong().toDouble()) n.toLong()
 private fun subscript(number: Int) = number.toString().map { "₀₁₂₃₄₅₆₇₈₉"[it.digitToInt()] }.joinToString("")
 
 @Composable
-private fun CalculatorKeypad(tab: String, onKey: (String) -> Unit, onTemplate: (String, Int) -> Unit) {
-    if (tab == "funcs") { FunctionKeypad(onKey, onTemplate); return }
+private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolean, onKey: (String) -> Unit, onTemplate: (String, Int) -> Unit) {
+    if (tab == "funcs") { FunctionKeypad(layout, is3D, onKey, onTemplate); return }
+    val calculator = layout == CalculatorLayout.Calculator
+    val first = if (calculator) "aᵇ" else "x"
+    val second = if (calculator) "√" else "y"
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     Column(Modifier.fillMaxWidth().background(Color(0xFFF0F0F0)).border(.5.dp, Border).padding(5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().height(38.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            val shortcuts = if (calculator) listOf("a²", "π", "!", "←", "→") else listOf("aᵇ", "√", "π", "←", "→")
+            shortcuts.forEach { label -> KeyTile(label, Modifier.weight(1f)) { onKey(label) } }
+        }
         if (tab == "ABC") {
             listOf("qwertyuiop", "asdfghjkl", "zxcvbnm").forEach { letters ->
                 Row(Modifier.fillMaxWidth().height(if (landscape) 40.dp else 48.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -714,7 +702,7 @@ private fun CalculatorKeypad(tab: String, onKey: (String) -> Unit, onTemplate: (
             }
         } else if (landscape) {
             val digits = listOf(listOf("7", "8", "9", "÷"), listOf("4", "5", "6", "×"), listOf("1", "2", "3", "−"), listOf("0", ".", "=", "+"))
-            val extras = listOf(listOf("x", "y", "("), listOf("ABC", "funcs", ")"), listOf("space", ",", "⌫"), listOf("a²", "√", "↵"))
+            val extras = listOf(listOf(first, second, if (!calculator && is3D) "z" else "("), listOf("ABC", "funcs", if (!calculator && is3D) "()" else ")"), listOf("space", ",", "⌫"), listOf("a²", "√", "↵"))
             repeat(4) { index ->
                 Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     digits[index].forEach { label -> KeyTile(label, Modifier.weight(1f), gray = label.first().isDigit()) { onKey(label) } }
@@ -724,10 +712,10 @@ private fun CalculatorKeypad(tab: String, onKey: (String) -> Unit, onTemplate: (
             }
         } else {
             val rows = listOf(
-                listOf("x", "7", "8", "9", "÷"),
-                listOf("y", "4", "5", "6", "×"),
-                listOf("(", "1", "2", "3", "−"),
-                listOf(")", "0", ".", "=", "+"),
+                listOf(first, "7", "8", "9", "÷"),
+                listOf(second, "4", "5", "6", "×"),
+                listOf(if (!calculator && is3D) "z" else "(", "1", "2", "3", "−"),
+                listOf(if (!calculator && is3D) "()" else ")", "0", ".", "=", "+"),
                 listOf("ABC", "funcs", "space", "⌫", "↵"),
             )
             rows.forEach { row ->
@@ -763,7 +751,7 @@ private fun KeyTile(label: String, modifier: Modifier = Modifier, gray: Boolean 
 private data class FunctionKey(val title: String, val source: String, val retreat: Int = 1)
 
 @Composable
-private fun FunctionKeypad(onKey: (String) -> Unit, onTemplate: (String, Int) -> Unit) {
+private fun FunctionKeypad(layout: CalculatorLayout, is3D: Boolean, onKey: (String) -> Unit, onTemplate: (String, Int) -> Unit) {
     var category by remember { mutableStateOf("Math") }
     val categories = listOf("Math", "LaTeX", "Calculus", "CAS", "Trig", "Matrix", "Stats", "More")
     val functions = when (category) {
@@ -799,7 +787,8 @@ private fun FunctionKeypad(onKey: (String) -> Unit, onTemplate: (String, Int) ->
             }
         }
         Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            listOf("x", "y", "space", "⌫", "↵").forEach { label -> KeyTile(label, Modifier.weight(1f), gray = true, blue = label == "↵") { onKey(label) } }
+            val contextual = if (layout == CalculatorLayout.Calculator) listOf("aᵇ", "√") else if (is3D) listOf("x", "y", "z") else listOf("x", "y")
+            (contextual + listOf("←", "→", "space", "⌫", "↵")).forEach { label -> KeyTile(label, Modifier.weight(1f), gray = true, blue = label == "↵") { onKey(label) } }
         }
     }
 }
@@ -808,7 +797,7 @@ private fun FunctionKeypad(onKey: (String) -> Unit, onTemplate: (String, Int) ->
 @Composable
 private fun MathExpression(source: String, fontSize: Int = 24, showCursor: Boolean = false, cursor: Int = source.length) {
     val integral = parseIntegral(source)
-    val fraction = if (!showCursor && integral == null) parseFraction(source) else null
+    val display = remember(source) { mathDisplay(source) }
     if (integral != null) {
         val args = integral.second
         val variable = args.getOrElse(1) { "x" }.ifBlank { "x" }
@@ -836,15 +825,8 @@ private fun MathExpression(source: String, fontSize: Int = 24, showCursor: Boole
                 if (showCursor && cursor >= source.length) MathCaret(fontSize)
             }
         }
-    } else if (fraction != null) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.width(IntrinsicSize.Max).padding(horizontal = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                PrettyText(fraction.first, (fontSize * .85).toInt())
-                Box(Modifier.fillMaxWidth().height(.8.dp).background(Color(0xFF111111)))
-                PrettyText(fraction.second, (fontSize * .85).toInt())
-            }
-            if (fraction.third.isNotEmpty()) PrettyText(fraction.third, fontSize)
-        }
+    } else if (!showCursor && display.hasFraction()) {
+        RenderMathDisplay(display, fontSize)
     } else {
         Row(verticalAlignment = Alignment.CenterVertically) {
             val at = cursor.coerceIn(0, source.length)
@@ -853,6 +835,25 @@ private fun MathExpression(source: String, fontSize: Int = 24, showCursor: Boole
                 MathCaret(fontSize)
                 PrettyText(source.drop(at), fontSize)
             } else PrettyText(source, fontSize)
+        }
+    }
+}
+
+@Composable
+internal fun RenderMathDisplay(display: MathDisplay, fontSize: Int) {
+    when (display) {
+        is MathDisplay.Text -> PrettyText(display.value, fontSize)
+        is MathDisplay.Row -> Row(verticalAlignment = Alignment.CenterVertically) {
+            display.children.forEach { RenderMathDisplay(it, fontSize) }
+        }
+        is MathDisplay.Fraction -> Column(
+            Modifier.width(IntrinsicSize.Max).padding(horizontal = 3.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            val childSize = (fontSize * .85).toInt().coerceAtLeast(12)
+            RenderMathDisplay(display.numerator, childSize)
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF111111)))
+            RenderMathDisplay(display.denominator, childSize)
         }
     }
 }
@@ -906,31 +907,6 @@ private fun prettyMath(source: String, fontSize: Int) = buildAnnotatedString {
             i++
         }
     }
-}
-
-private fun parseFraction(source: String): Triple<String, String, String>? {
-    if (source.any { it in "=<>[]," }) return null
-    var depth = 0
-    var slash = -1
-    source.forEachIndexed { index, c ->
-        when (c) {
-            '(' -> depth++
-            ')' -> depth--
-            '/' -> if (depth == 0) { if (slash >= 0) return null; slash = index }
-            '+', '-' -> if (depth == 0 && index > 0 && slash < 0) return null
-        }
-    }
-    if (slash <= 0 || slash == source.lastIndex) return null
-    depth = 0
-    var tailStart = source.length
-    for (i in slash + 1 until source.length) {
-        when (source[i]) {
-            '(' -> depth++
-            ')' -> depth--
-            '+', '-', '*' -> if (depth == 0 && i > slash + 1) { tailStart = i; break }
-        }
-    }
-    return Triple(source.substring(0, slash), source.substring(slash + 1, tailStart), source.substring(tailStart))
 }
 
 private fun parseIntegral(source: String): Pair<String, List<String>>? {
@@ -1084,7 +1060,7 @@ private fun HelpSheet(onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White) {
         Column(Modifier.fillMaxWidth().heightIn(max = 610.dp).verticalScroll(rememberScrollState()).padding(horizontal = 23.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Text("Calculator guide", fontSize = 23.sp)
-            Text("Tap anywhere in any equation to place the cursor and edit directly. Typing sin, cos, sqrt, or other function names opens an argument pair automatically. The keypad includes a spacebar; Functions includes a LaTeX tab. Tap an exact result to switch to its decimal value; long-press to copy it.", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
+            Text("Edit mathematics directly: tap a numerator, denominator, or exponent to place the cursor there. Division creates a fraction; use the arrow keys to move between slots or out of a fraction. Hold and drag to select. Typing sin, cos, sqrt, or other function names opens an argument pair automatically. The keypad adapts to calculator, 2D, and 3D modes. Tap an exact result to switch to its decimal value; long-press to copy it.", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
             Text("Symbolic mathematics is powered by Giac/Xcas and runs on your device. Use exact fractions and assumptions when you need symbolic results.", fontSize = 12.sp, color = Muted, lineHeight = 18.sp)
             listOf(
                 "2D graphs" to "y=sin(x)\nx^2+y^2=9\ny<x^2\na=2\ny=a*x^2",

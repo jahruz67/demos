@@ -51,7 +51,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     var appliedBounds by rememberSaveable {mutableStateOf<List<Double?>?>(null)}
     var size by remember {mutableStateOf(IntSize(1,1))}
     var trace by remember {mutableStateOf<Offset?>(null)}
-    val view=Viewport(center.x.toDouble(),center.y.toDouble(),viewWidth,viewHeightOverride?: (viewWidth*size.height/max(1,size.width)))
+    val view=Viewport(center.x.toDouble(),center.y.toDouble(),viewWidth,viewHeightOverride?: (viewWidth*max(1,size.height)/max(1,size.width)))
     var geometry by remember {mutableStateOf(Geometry2D())}
     var meshes by remember {mutableStateOf(emptyList<Mesh3D>())}
     var glView by remember {mutableStateOf<GraphSurfaceView?>(null)}
@@ -180,6 +180,12 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                     }
                 }
             ) {
+                // Use this frame's canvas bounds, rather than the remembered sampling
+                // size, which still contains the 1x1 placeholder on the first draw.
+                val size=this.size
+                // Launch, rotation and split-screen resizing can produce an empty frame.
+                // Do not calculate grid spacing or label positions until it has an area.
+                if(size.width<=0f || size.height<=0f) return@Canvas
                 fun sx(x:Double)=((x-view.left)/view.width*size.width).toFloat()
                 fun sy(y:Double)=((view.top-y)/view.height*size.height).toFloat()
                 val scale=size.width/view.width
@@ -204,7 +210,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                     if(0.0 in view.left..view.right) drawLine(Color(0xFF222222),Offset(sx(0.0),0f),Offset(sx(0.0),size.height.toFloat()),1.5f*density)
                     if(0.0 in view.bottom..view.top) drawLine(Color(0xFF222222),Offset(0f,sy(0.0)),Offset(size.width.toFloat(),sy(0.0)),1.5f*density)
                     labelPaint.textSize=13*density
-                    val baseline=sy(0.0).coerceIn(2*density,size.height-20*density)+16*density
+                    val baseline=sy(0.0).coerceIn(2*density,max(2*density,size.height-20*density))+16*density
                     var x=ceil(view.left/major)*major
                     var guard=0
                     while(x<=view.right && guard++<100) {
@@ -215,7 +221,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                         };x+=major
                     }
                     var y=ceil(view.bottom/majorY)*majorY
-                    val xPosition=sx(0.0).coerceIn(35*density,size.width-2*density)-5*density
+                    val xPosition=sx(0.0).coerceIn(35*density,max(35*density,size.width-2*density))-5*density
                     guard=0
                     while(y<=view.top && guard++<100) {
                         if(abs(y)>majorY*1e-5) {
