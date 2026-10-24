@@ -12,6 +12,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -23,6 +24,7 @@ import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -34,6 +36,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
+import kotlinx.coroutines.awaitCancellation
 import kotlin.math.abs
 
 internal data class MathSlot(val start: Int, val end: Int, val emptyArgument: Boolean = false)
@@ -47,7 +50,8 @@ internal fun EditableMath.slots(): List<MathSlot> = when (this) {
 
 private data class MathHit(val offset: Int, val position: Offset, val height: Float)
 
-/** The native text service handles input/clipboard; its decoration IS the two-dimensional editor. */
+/** Native editing and clipboard with a custom keypad and two-dimensional decoration. */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, modifier: Modifier = Modifier,
     onInput: (TextFieldValue) -> Unit, onFocus: (Boolean) -> Unit, onSelect: () -> Unit) {
@@ -78,51 +82,55 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
         val dx = point.x - it.position.x
         dx * dx + dy * dy * 4
     }?.offset
-    BasicTextField(value = value, onValueChange = onInput, singleLine = true,
-        textStyle = TextStyle(fontSize = 26.sp, color = Color.Transparent), cursorBrush = SolidColor(Color.Transparent),
-        keyboardOptions = KeyboardOptions(showKeyboardOnFocus = false),
-        modifier = modifier.heightIn(min = 48.dp).focusRequester(focus).onFocusChanged { onFocus(it.isFocused) }
-            .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) false else when (event.key) {
-                    Key.Backspace -> { onInput(MathInputRules.backspace(value)); true }
-                    Key.DirectionLeft, Key.DirectionRight -> {
-                        val offsets = slots.flatMap { (it.start..it.end).toList() }.distinct().sorted()
-                        val next = if (event.key == Key.DirectionLeft) offsets.lastOrNull { it < value.selection.end }
-                            else offsets.firstOrNull { it > value.selection.end }
-                        if (next != null) choose(next, event.isShiftPressed)
-                        true
+    // showKeyboardOnFocus only prevents the initial request. Block the input
+    // session itself so taps, selection and refocusing cannot open the tablet IME.
+    InterceptPlatformTextInput(interceptor = { _, _ -> awaitCancellation() }) {
+        BasicTextField(value = value, onValueChange = onInput, singleLine = true,
+            textStyle = TextStyle(fontSize = 26.sp, color = Color.Transparent), cursorBrush = SolidColor(Color.Transparent),
+            keyboardOptions = KeyboardOptions(showKeyboardOnFocus = false),
+            modifier = modifier.heightIn(min = 48.dp).focusRequester(focus).onFocusChanged { onFocus(it.isFocused) }
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) false else when (event.key) {
+                        Key.Backspace -> { onInput(MathInputRules.backspace(value)); true }
+                        Key.DirectionLeft, Key.DirectionRight -> {
+                            val offsets = slots.flatMap { (it.start..it.end).toList() }.distinct().sorted()
+                            val next = if (event.key == Key.DirectionLeft) offsets.lastOrNull { it < value.selection.end }
+                                else offsets.firstOrNull { it > value.selection.end }
+                            if (next != null) choose(next, event.isShiftPressed)
+                            true
+                        }
+                        Key.DirectionUp, Key.DirectionDown -> {
+                            val current = hits[owner]?.minByOrNull { abs(it.offset - value.selection.end) }
+                            val next = current?.let { here -> hits.values.flatten().filter {
+                                if (event.key == Key.DirectionUp) it.position.y + it.height / 2 < here.position.y
+                                else it.position.y > here.position.y + here.height / 2
+                            }.minByOrNull { abs(it.position.x - here.position.x) + abs(it.position.y - here.position.y) * 2 } }
+                            if (next != null) choose(next.offset, event.isShiftPressed)
+                            true
+                        }
+                        else -> false
                     }
-                    Key.DirectionUp, Key.DirectionDown -> {
-                        val current = hits[owner]?.minByOrNull { abs(it.offset - value.selection.end) }
-                        val next = current?.let { here -> hits.values.flatten().filter {
-                            if (event.key == Key.DirectionUp) it.position.y + it.height / 2 < here.position.y
-                            else it.position.y > here.position.y + here.height / 2
-                        }.minByOrNull { abs(it.position.x - here.position.x) + abs(it.position.y - here.position.y) * 2 } }
-                        if (next != null) choose(next.offset, event.isShiftPressed)
-                        true
+                }.semantics { contentDescription = "Equation $number" },
+            decorationBox = { field ->
+                Box(Modifier.fillMaxWidth().onGloballyPositioned { viewportOrigin = it.positionInRoot() }) {
+                    // Keep one native editing and semantics surface, with no second visible line.
+                    Box(Modifier.size(1.dp).alpha(0f)) { field() }
+                    Box(Modifier.fillMaxWidth().horizontalScroll(scroll).padding(vertical = 6.dp, horizontal = 2.dp)
+                        .pointerInput(tree) {
+                            detectDragGesturesAfterLongPress(onDragStart = { point ->
+                                nearest(viewportOrigin + point - Offset(scroll.value.toFloat(), 0f))?.let { choose(it) }
+                            }, onDrag = { change, _ ->
+                                change.consume()
+                                nearest(viewportOrigin + change.position - Offset(scroll.value.toFloat(), 0f))?.let { choose(it, true) }
+                            })
+                        }) {
+                        if (value.text.isEmpty()) Text("Type an expression", color = Color(0xFFAAAAAA), fontSize = 18.sp)
+                        MathEditorNode(tree, value, 26, owner, selected && caretVisible, hits,
+                            onChoose = { choose(it) })
                     }
-                    else -> false
                 }
-            }.semantics { contentDescription = "Equation $number" },
-        decorationBox = { field ->
-            Box(Modifier.fillMaxWidth().onGloballyPositioned { viewportOrigin = it.positionInRoot() }) {
-                // Keep one native editable semantics/input connection, with no second visible line.
-                Box(Modifier.size(1.dp).alpha(0f)) { field() }
-                Box(Modifier.fillMaxWidth().horizontalScroll(scroll).padding(vertical = 6.dp, horizontal = 2.dp)
-                    .pointerInput(tree) {
-                        detectDragGesturesAfterLongPress(onDragStart = { point ->
-                            nearest(viewportOrigin + point - Offset(scroll.value.toFloat(), 0f))?.let { choose(it) }
-                        }, onDrag = { change, _ ->
-                            change.consume()
-                            nearest(viewportOrigin + change.position - Offset(scroll.value.toFloat(), 0f))?.let { choose(it, true) }
-                        })
-                    }) {
-                    if (value.text.isEmpty()) Text("Type an expression", color = Color(0xFFAAAAAA), fontSize = 18.sp)
-                    MathEditorNode(tree, value, 26, owner, selected && caretVisible, hits,
-                        onChoose = { choose(it) })
-                }
-            }
-        })
+            })
+    }
 }
 
 @Composable

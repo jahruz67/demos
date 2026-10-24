@@ -51,7 +51,13 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     var appliedBounds by rememberSaveable {mutableStateOf<List<Double?>?>(null)}
     var size by remember {mutableStateOf(IntSize(1,1))}
     var trace by remember {mutableStateOf<Offset?>(null)}
-    val view=Viewport(center.x.toDouble(),center.y.toDouble(),viewWidth,viewHeightOverride?: (viewWidth*max(1,size.height)/max(1,size.width)))
+    fun current2DView()=Viewport(center.x.toDouble(),center.y.toDouble(),viewWidth,viewHeightOverride?: (viewWidth*max(1,size.height)/max(1,size.width)))
+    val view=current2DView()
+    fun apply2DTransform(transformed:Viewport,axes:PlotZoomAxes) {
+        center=Offset(transformed.centerX.toFloat(),transformed.centerY.toFloat())
+        viewWidth=transformed.width
+        if(viewHeightOverride!=null || axes!=PlotZoomAxes.Both) viewHeightOverride=transformed.height
+    }
     var geometry by remember {mutableStateOf(Geometry2D())}
     var meshes by remember {mutableStateOf(emptyList<Mesh3D>())}
     var glView by remember {mutableStateOf<GraphSurfaceView?>(null)}
@@ -99,6 +105,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     }
     val latestGeometry by rememberUpdatedState(geometry)
     val latestView by rememberUpdatedState(view)
+    val latestShowAxes by rememberUpdatedState(settings.showAxes)
     val density=LocalDensity.current.density
     val labelPaint=remember {Paint(Paint.ANTI_ALIAS_FLAG).apply {color=android.graphics.Color.BLACK}}
     Box(modifier.background(Color.White).onSizeChanged {size=it}) {
@@ -126,38 +133,44 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                         var pastSlop=false
                         var cancelled=false
                         var multiplePointers=false
+                        var zoomAxes:PlotZoomAxes?=null
                         var accumulatedPan=Offset.Zero
                         var accumulatedZoom=1f
+                        var initialCentroid=Offset.Zero
+                        var previousPointerCount=0
                         var pressed=true
                         while(pressed) {
                             val event=awaitPointerEvent()
                             pressed=event.changes.any {it.pressed}
                             if(event.changes.any {it.isConsumed}) {cancelled=true;break}
                             multiplePointers=multiplePointers || event.changes.count {it.pressed || it.previousPressed}>1
-                            val zoom=event.calculateZoom()
+                            val pointers=event.changes.filter {it.pressed && it.previousPressed}
+                            if(zoomAxes==null && event.changes.count {it.pressed}>=2) {
+                                zoomAxes=if(latestShowAxes) plotZoomAxes(event.changes.filter {it.pressed}.map {it.position},current2DView(),size,28*density) else PlotZoomAxes.Both
+                            }
+                            val axes=if(pointers.size>=2) zoomAxes?:PlotZoomAxes.Both else PlotZoomAxes.Both
+                            val zoom=if(axes==PlotZoomAxes.Both) event.calculateZoom() else plotAxisZoom(pointers.map {it.previousPosition},pointers.map {it.position},axes)
                             val pan=event.calculatePan()
+                            val centroid=event.calculateCentroid(useCurrent=false)
+                            if(!pastSlop && pointers.size!=previousPointerCount) {
+                                accumulatedPan=Offset.Zero
+                                accumulatedZoom=1f
+                                initialCentroid=centroid
+                            }
+                            previousPointerCount=pointers.size
                             accumulatedPan+=pan
                             accumulatedZoom*=zoom
+                            val wasPastSlop=pastSlop
                             if(!pastSlop) {
                                 val zoomMotion=abs(1-accumulatedZoom)*event.calculateCentroidSize(useCurrent=false)
                                 pastSlop=zoomMotion>viewConfiguration.touchSlop || accumulatedPan.getDistance()>viewConfiguration.touchSlop
                             }
                             if(pastSlop && (zoom!=1f || pan!=Offset.Zero)) {
-                                val centroid=event.calculateCentroid(useCurrent=false)
-                                val oldWidth=viewWidth
-                                val newWidth=(oldWidth/zoom).coerceIn(1e-7,1e10)
-                                val pixelWidth=max(1,size.width)
-                                val pixelHeight=max(1,size.height)
-                                val oldHeight=viewHeightOverride?: (oldWidth*pixelHeight/pixelWidth)
-                                val newHeight=oldHeight*newWidth/oldWidth
-                                // Anchor the zoom under the fingers and translate using
-                                // the new scale so simultaneous pan/zoom does not drift.
-                                center=Offset(
-                                    (center.x+(centroid.x-pixelWidth/2.0)*(oldWidth-newWidth)/pixelWidth-pan.x*newWidth/pixelWidth).toFloat(),
-                                    (center.y+(pixelHeight/2.0-centroid.y)*(oldHeight-newHeight)/pixelHeight+pan.y*newHeight/pixelHeight).toFloat(),
-                                )
-                                viewWidth=newWidth
-                                if(viewHeightOverride!=null) viewHeightOverride=newHeight
+                                // Apply the initial movement too: crossing touch slop must
+                                // not drop part of the pinch and break one-to-one scaling.
+                                val transformed=if(wasPastSlop) current2DView().transformPlot(zoom,pan,centroid,size,axes)
+                                    else current2DView().transformPlot(accumulatedZoom,accumulatedPan,initialCentroid,size,axes)
+                                apply2DTransform(transformed,axes)
                                 trace=null
                             }
                             if(pastSlop) event.changes.forEach {if(it.positionChanged()) it.consume()}
@@ -262,8 +275,8 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                 PlotButton("+","Zoom in") {glView?.zoomBy(1.3f)}
                 PlotButton("−","Zoom out") {glView?.zoomBy(1/1.3f)}
             } else {
-                PlotButton("+","Zoom in") {viewWidth=(viewWidth/1.3).coerceAtLeast(1e-7);viewHeightOverride=viewHeightOverride?.div(1.3);trace=null}
-                PlotButton("−","Zoom out") {viewWidth=(viewWidth*1.3).coerceAtMost(1e10);viewHeightOverride=viewHeightOverride?.times(1.3);trace=null}
+                PlotButton("+","Zoom in") {apply2DTransform(current2DView().transformPlot(1.3f,Offset.Zero,Offset(size.width/2f,size.height/2f),size,PlotZoomAxes.Both),PlotZoomAxes.Both);trace=null}
+                PlotButton("−","Zoom out") {apply2DTransform(current2DView().transformPlot(1/1.3f,Offset.Zero,Offset(size.width/2f,size.height/2f),size,PlotZoomAxes.Both),PlotZoomAxes.Both);trace=null}
             }
         }
     }

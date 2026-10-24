@@ -251,10 +251,6 @@ fun CalculatorScreen(
                 Box(modifier) {
                     graphState.SaveableStateProvider("graph") { graph(state.is3D, Modifier.fillMaxSize()) }
                     if (showGraphControls) {
-                        GraphTool(IconKind.Fullscreen, if (state.layout == CalculatorLayout.Graph) "Exit graph fullscreen" else "Graph fullscreen", Modifier.align(Alignment.TopStart).padding(5.dp)) {
-                            setKeyboardVisible(false)
-                            onAction(CalculatorAction.SetLayout(if (state.layout == CalculatorLayout.Graph) CalculatorLayout.Split else CalculatorLayout.Graph))
-                        }
                         GraphTool(IconKind.Wrench, "Graph settings", Modifier.align(Alignment.TopEnd).padding(5.dp)) { showSettings = true }
                         if (state.layout == CalculatorLayout.Graph) GraphTool(IconKind.Export, "Export graph", Modifier.align(Alignment.BottomEnd).padding(6.dp)) { showGraphExport = true }
                     }
@@ -1031,7 +1027,7 @@ private fun SettingsSheet(state: CalculatorUiState, onDismiss: () -> Unit, onAct
                 }) { Text("Apply", fontSize = 12.sp) }
             }
             Text("View", fontSize = 15.sp, modifier = Modifier.padding(bottom = 4.dp))
-            Text(if (state.is3D) "3D: drag to orbit; pinch to zoom. Use two fingers to pan." else "2D: drag to pan; pinch to zoom. Tap a curve to inspect a point.", fontSize = 12.sp, lineHeight = 18.sp, color = Muted)
+            Text(if (state.is3D) "3D: drag to orbit; pinch to zoom. Use two fingers to pan." else "2D: drag to pan; pinch inside the graph to zoom both axes equally. Pinch along an axis to zoom only that axis. Tap a curve to inspect a point.", fontSize = 12.sp, lineHeight = 18.sp, color = Muted)
             Spacer(Modifier.height(20.dp))
         }
     }
@@ -1072,7 +1068,7 @@ private fun HelpSheet(onDismiss: () -> Unit) {
                 "Tables and regressions" to "Use + → Table to enter points.\nlinear_regression(x_1,y_1)\npolynomial_regression(x_1,y_1,2)\ny_1~m*x_1+b",
                 "Math LaTeX" to "Type or paste \\frac{1}{2}, \\sqrt{x}, x^{2}, x_{1}, or \\sin(x). Use Functions → LaTeX for templates. Fractions, roots, powers, subscripts, and common math commands are rendered directly in the editable equation.",
                 "Import and export" to "Use the top menu to save a graph as PNG or PDF.\nUse + → Import table for two-column CSV, TSV, or JSON.\nCSV/TSV may include an x,y header. JSON accepts [[x,y],…], [{\"x\":1,\"y\":2},…], or x and y arrays.\nUse the export icon beside a table to save just that table.\nImports support up to 2,000 rows and 1 MB.",
-                "Fullscreen" to "Use the corner icon on the graph or calculator toolbar to expand that view. Your choice is remembered when you reopen the app.\nCalculator fullscreen opens with the keypad ready for typing. Keyboard visibility is remembered when you reopen the app. Tap anywhere in an equation to place the cursor. Back hides the keypad, then returns to the split view.",
+                "Fullscreen" to "Use the fullscreen icon on the calculator toolbar to expand the calculator. Your choice is remembered when you reopen the app.\nCalculator fullscreen opens with the keypad ready for typing. Keyboard visibility is remembered when you reopen the app. Tap anywhere in an equation to place the cursor. Back hides the keypad, then returns to the split view.",
             ).forEach { (heading, examples) ->
                 Text(heading, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 Text(examples, fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 20.sp,
