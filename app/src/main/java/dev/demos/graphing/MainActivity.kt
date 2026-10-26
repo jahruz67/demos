@@ -46,7 +46,6 @@ import dev.demos.graphing.plot.PlotSettings
 import dev.demos.graphing.data.GraphImages
 import dev.demos.graphing.ui.CalculatorScreen
 import dev.demos.graphing.ui.CalculatorLayout
-import dev.demos.graphing.ui.StartupScreen
 import dev.demos.graphing.ui.GraphExportFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -154,21 +153,14 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             val current by model.state.collectAsStateWithLifecycle()
-            val startupReady by model.startupReady.collectAsStateWithLifecycle()
-            LaunchedEffect(current.layout, startupReady) {
+            LaunchedEffect(current.layout) {
                 WindowCompat.getInsetsController(window, window.decorView).apply {
                     systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    if (!startupReady || current.layout == CalculatorLayout.Split) show(WindowInsetsCompat.Type.systemBars())
+                    if (current.layout == CalculatorLayout.Split) show(WindowInsetsCompat.Type.systemBars())
                     else hide(WindowInsetsCompat.Type.systemBars())
                 }
             }
             MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFF2D70D9), background = Color.White, surface = Color.White)) {
-                // Compose the worksheet and create its graph surface only once,
-                // after the recovered document and saved layout are available.
-                if (!startupReady) {
-                    StartupScreen()
-                    return@MaterialTheme
-                }
                 Box(Modifier.fillMaxSize().background(Color.Black).windowInsetsPadding(WindowInsets.safeDrawing)) {
                     CalculatorScreen(current, model::onAction, showGraphControls = !capturing, onOpenLibrary = { model.loadLibrary() }) { is3D, modifier ->
                         GraphPlot(

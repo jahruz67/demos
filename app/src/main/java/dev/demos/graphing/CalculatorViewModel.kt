@@ -50,8 +50,6 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         rows = listOf(newRow(1)), activeId = 1,
     ))
     val state = _state.asStateFlow()
-    private val _startupReady = MutableStateFlow(false)
-    val startupReady = _startupReady.asStateFlow()
     private val effectsChannel = Channel<CalculatorEffect>(Channel.BUFFERED)
     val effects = effectsChannel.receiveAsFlow()
     private var graphId = UUID.randomUUID().toString()
@@ -92,7 +90,6 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             _state.value = _state.value.copy(layout = layout, keyboardVisible = keyboardVisible)
             if (generation == recoveryGeneration && !_state.value.dirty && recovered != null) applyDocument(recovered)
             restorePending = false
-            _startupReady.value = true
             if (_state.value.dirty) changed() else scheduleEvaluation()
         }
     }
