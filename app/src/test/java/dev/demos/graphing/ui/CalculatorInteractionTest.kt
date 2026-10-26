@@ -2,6 +2,7 @@ package dev.demos.graphing.ui
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.MutableState
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -22,9 +23,9 @@ import org.robolectric.annotation.GraphicsMode
 class CalculatorInteractionTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
-    private fun worksheet(rows: List<ExpressionRow>, keyboard: Boolean = true) {
+    private fun worksheet(rows: List<ExpressionRow>, keyboard: Boolean = true, defaultDecimal: Boolean = true): MutableState<CalculatorUiState> {
         val state = mutableStateOf(CalculatorUiState(rows, rows.first().id,
-            layout = CalculatorLayout.Calculator, keyboardVisible = keyboard))
+            layout = CalculatorLayout.Calculator, keyboardVisible = keyboard, defaultDecimal = defaultDecimal))
         compose.setContent {
             CalculatorScreen(state.value, onAction = { action ->
                 state.value = when (action) {
@@ -33,6 +34,8 @@ class CalculatorInteractionTest {
                         if (it.id == action.id) it.copy(text = action.text) else it
                     })
                     is CalculatorAction.SetKeyboardVisible -> state.value.copy(keyboardVisible = action.visible)
+                    is CalculatorAction.SetDefaultDecimal -> state.value.copy(defaultDecimal = action.enabled)
+                    is CalculatorAction.SetKeyboardHeightScale -> state.value.copy(keyboardHeightScale = action.scale)
                     CalculatorAction.AddRow, CalculatorAction.AppendRow -> {
                         val id = state.value.rows.maxOf { it.id } + 1
                         state.value.copy(rows = state.value.rows + ExpressionRow(id, ""), activeId = id)
@@ -41,6 +44,7 @@ class CalculatorInteractionTest {
                 }
             }, graph = { _, _ -> })
         }
+        return state
     }
 
     @Test fun tappingBetweenZerosInAnInactiveNumberInsertsThere() {
@@ -110,11 +114,75 @@ class CalculatorInteractionTest {
 
     @Test fun decimalChoiceSurvivesScrollingTheResultOutOfTheList() {
         worksheet(listOf(ExpressionRow(1, "sqrt(2)", result = "sqrt(2)", approximate = "1.414213562373095")) +
-            (2L..30L).map { ExpressionRow(it, it.toString()) })
+            (2L..30L).map { ExpressionRow(it, it.toString()) }, defaultDecimal = false)
         compose.onNodeWithContentDescription("Result 1").performClick()
         compose.onNodeWithText("1.414213562373095", useUnmergedTree = true).assertIsDisplayed()
         val list = compose.onNode(hasScrollToIndexAction())
         list.performScrollToIndex(29)
+        list.performScrollToIndex(0)
+        compose.onNodeWithText("1.414213562373095", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test fun decimalIsTheDefaultAndResultsStillToggle() {
+        worksheet(listOf(ExpressionRow(1, "sqrt(2)", result = "sqrt(2)", approximate = "1.414213562373095"),
+            ExpressionRow(2, "x+x", result = "2*x")))
+        compose.onNodeWithText("1.414213562373095", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Result 2").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Result 1").performClick()
+        compose.onNodeWithText("1.414213562373095", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Result 1").performClick()
+        compose.onNodeWithText("1.414213562373095", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test fun settingsChangeTheDefaultForExistingResults() {
+        worksheet(listOf(ExpressionRow(1, "sqrt(2)", result = "sqrt(2)", approximate = "1.414213562373095")))
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNodeWithText("Decimal").assertIsSelected()
+        compose.onNodeWithText("Exact").performClick().assertIsSelected()
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Result 1").assertIsDisplayed()
+        compose.onNodeWithText("1.414213562373095", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Result 1").performClick()
+        compose.onNodeWithText("1.414213562373095", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test fun heightSliderResizesNumericAndAlphabeticKeys() {
+        worksheet(listOf(ExpressionRow(1, "")))
+        val numberHeight = compose.onNodeWithContentDescription("7").fetchSemanticsNode().boundsInRoot.height
+        compose.onNodeWithContentDescription("Keyboard height").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(1.4f) }
+        compose.onNodeWithText("140%").assertIsDisplayed()
+        assertTrue(compose.onNodeWithContentDescription("7").fetchSemanticsNode().boundsInRoot.height > numberHeight)
+        compose.onNodeWithContentDescription("ABC").performClick()
+        val letterHeight = compose.onNodeWithContentDescription("q").fetchSemanticsNode().boundsInRoot.height
+        compose.onNodeWithContentDescription("Keyboard height").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(.8f) }
+        compose.onNodeWithText("80%").assertIsDisplayed()
+        assertTrue(compose.onNodeWithContentDescription("q").fetchSemanticsNode().boundsInRoot.height < letterHeight)
+        compose.onNodeWithContentDescription("Equation 1").assertIsDisplayed()
+    }
+
+    @Test @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
+    fun heightSliderAlsoResizesLandscapeKeys() = heightSliderResizesNumericAndAlphabeticKeys()
+
+    @Test @Config(qualifiers = "w640dp-h360dp-land-mdpi")
+    fun maximumKeyboardHeightKeepsTheWorksheetAndKeysVisibleOnAShortScreen() {
+        worksheet(listOf(ExpressionRow(1, "")))
+        compose.onNodeWithContentDescription("Keyboard height").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(1.4f) }
+        compose.onNodeWithContentDescription("Equation 1").assertIsDisplayed()
+        compose.onNodeWithContentDescription("7").assertIsDisplayed()
+        compose.onNodeWithContentDescription("New expression").assertIsDisplayed()
+        compose.onNodeWithContentDescription("ABC").performClick()
+        compose.onNodeWithContentDescription("q").assertIsDisplayed()
+        compose.onNodeWithContentDescription("New expression").assertIsDisplayed()
+    }
+
+    @Test fun aNewDefaultAppliesToRowsThatWereScrolledOutOfView() {
+        val state = worksheet(listOf(ExpressionRow(1, "sqrt(2)", result = "sqrt(2)", approximate = "1.414213562373095")) +
+            (2L..30L).map { ExpressionRow(it, it.toString()) }, defaultDecimal = false)
+        compose.onNodeWithText("1.414213562373095", useUnmergedTree = true).assertDoesNotExist()
+        val list = compose.onNode(hasScrollToIndexAction())
+        list.performScrollToIndex(29)
+        compose.runOnIdle { state.value = state.value.copy(defaultDecimal = true) }
         list.performScrollToIndex(0)
         compose.onNodeWithText("1.414213562373095", useUnmergedTree = true).assertIsDisplayed()
     }

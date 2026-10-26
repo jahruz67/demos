@@ -70,6 +70,8 @@ data class CalculatorUiState(
     val statusMessage: String? = null,
     val layout: CalculatorLayout = CalculatorLayout.Split,
     val keyboardVisible: Boolean = true,
+    val defaultDecimal: Boolean = true,
+    val keyboardHeightScale: Float = 1f,
     val sliderSettings: Map<String, SliderConfiguration> = emptyMap(),
     val tableFits: Map<Long, dev.demos.graphing.math.RegressionFit> = emptyMap(),
     val documentRevision: Long = 0,
@@ -109,6 +111,8 @@ sealed interface CalculatorAction {
     data object ImportTable : CalculatorAction
     data class SetLayout(val layout: CalculatorLayout) : CalculatorAction
     data class SetKeyboardVisible(val visible: Boolean) : CalculatorAction
+    data class SetDefaultDecimal(val enabled: Boolean) : CalculatorAction
+    data class SetKeyboardHeightScale(val scale: Float) : CalculatorAction
     data class SetDegreeMode(val enabled: Boolean) : CalculatorAction
     data class SetGrid(val enabled: Boolean) : CalculatorAction
     data class SetAxes(val enabled: Boolean) : CalculatorAction

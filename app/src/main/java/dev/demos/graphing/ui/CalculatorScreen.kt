@@ -34,6 +34,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -352,6 +353,7 @@ fun CalculatorScreen(
             DropdownMenuItem(text = { Text("Save graph") }, onClick = { showSave = true; showMenu = false })
             DropdownMenuItem(text = { Text("Calculator fullscreen") }, onClick = { onAction(CalculatorAction.SetLayout(CalculatorLayout.Calculator)); showMenu = false })
             DropdownMenuItem(text = { Text("Graph fullscreen") }, onClick = { onAction(CalculatorAction.SetLayout(CalculatorLayout.Graph)); showMenu = false })
+            DropdownMenuItem(text = { Text("Settings") }, onClick = { showSettings = true; showMenu = false })
             DropdownMenuItem(text = { Text(if (editingList) "Finish editing expression list" else "Edit expression list") }, onClick = { editingList = !editingList; showMenu = false })
             HorizontalDivider()
             DropdownMenuItem(text = { Text("Export graph file") }, onClick = { onAction(CalculatorAction.ExportDocument); showMenu = false })
@@ -399,6 +401,7 @@ fun CalculatorScreen(
                     onAdd = { showAddMenu = !showAddMenu }, onUndo = { onAction(CalculatorAction.Undo) },
                     onRedo = { onAction(CalculatorAction.Redo) },
                     onCollapse = { setKeyboardVisible(!keyboardVisible) },
+                    onSettings = { showSettings = true },
                     fullscreen = state.layout == CalculatorLayout.Calculator,
                     onFullscreen = {
                         onAction(CalculatorAction.SetLayout(if (state.layout == CalculatorLayout.Calculator) CalculatorLayout.Split else CalculatorLayout.Calculator))
@@ -516,6 +519,7 @@ fun CalculatorScreen(
                                             onVisibility = { onAction(CalculatorAction.ToggleVisibility(row.id)) }, onColor = { colorEditor = row },
                                             slider = state.sliders.firstOrNull { slider -> runCatching { dev.demos.graphing.math.MathSyntax.definition(row.text)?.name == slider.name }.getOrDefault(false) },
                                             missingVariables = missingSliderVariables(row.text, state), onAction = onAction,
+                                            defaultDecimal = state.defaultDecimal,
                                             onSettingsFocus = { focused -> textInputFocused = focused; if (focused) setKeyboardVisible(false) },
                                         )
                                     }
@@ -559,7 +563,9 @@ fun CalculatorScreen(
             measuredKeypadHeight = height
             if (reservedKeypadHeight == 0.dp && height > 0.dp) reservedKeypadHeight = height
         }) {
-            CalculatorKeypad(keyboardTab, state.layout, state.is3D, onKey = ::key, onTemplate = { template, retreat -> edit(template, retreat) })
+            CalculatorKeypad(keyboardTab, state.layout, state.is3D, state.keyboardHeightScale,
+                onHeightChange = { onAction(CalculatorAction.SetKeyboardHeightScale(it)) },
+                onKey = ::key, onTemplate = { template, retreat -> edit(template, retreat) })
         }
     }
 
@@ -619,7 +625,7 @@ private fun CalculatorHeader(state: CalculatorUiState, onOpen: () -> Unit, onSav
 
 @Composable
 private fun ExpressionToolbar(canUndo: Boolean, canRedo: Boolean, keyboardVisible: Boolean, onAdd: () -> Unit, onUndo: () -> Unit, onRedo: () -> Unit, onCollapse: () -> Unit, fullscreen: Boolean, onFullscreen: () -> Unit,
-    addMenuExpanded: Boolean, onAddMenuDismiss: () -> Unit, onInsert: (String) -> Unit, modifier: Modifier = Modifier) {
+    addMenuExpanded: Boolean, onAddMenuDismiss: () -> Unit, onInsert: (String) -> Unit, onSettings: () -> Unit, modifier: Modifier = Modifier) {
     Row(modifier.fillMaxWidth().height(52.dp).background(Brush.verticalGradient(listOf(Color(0xFFFCFCFC), Color(0xFFECECEC))))
         .border(width = .5.dp, color = Border).padding(horizontal = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         Box {
@@ -638,14 +644,19 @@ private fun ExpressionToolbar(canUndo: Boolean, canRedo: Boolean, keyboardVisibl
         ToolIcon(IconKind.Redo, "Redo", if (canRedo) Muted else Color(0xFFC8C8C8), onRedo)
         Spacer(Modifier.weight(1f))
         ToolIcon(IconKind.Keyboard, if (keyboardVisible) "Hide keyboard" else "Show keyboard", if (keyboardVisible) Blue else Muted, onCollapse)
+        ToolIcon(IconKind.Settings, "Settings", Muted, onSettings)
         ToolIcon(IconKind.Fullscreen, if (fullscreen) "Exit calculator fullscreen" else "Calculator fullscreen", if (fullscreen) Blue else Muted, onFullscreen)
     }
 }
 
 @Composable
 private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, value: TextFieldValue, graphable: Boolean, onInput: (TextFieldValue) -> Unit, onInputFocus: (Boolean) -> Unit, onSelect: () -> Unit, onDelete: () -> Unit, onVisibility: () -> Unit, onColor: () -> Unit,
-    slider: SliderUi? = null, missingVariables: List<String> = emptyList(), onAction: (CalculatorAction) -> Unit, onSettingsFocus: (Boolean) -> Unit = {}) {
-    var decimal by rememberSaveable(row.id) { mutableStateOf(false) }
+    slider: SliderUi? = null, missingVariables: List<String> = emptyList(), onAction: (CalculatorAction) -> Unit, defaultDecimal: Boolean = true, onSettingsFocus: (Boolean) -> Unit = {}) {
+    // Lazy rows can be restored after the global default changed while off screen.
+    var decimal by rememberSaveable(row.id, defaultDecimal, stateSaver = listSaver<Boolean, Boolean>(
+        save = { listOf(defaultDecimal, it) },
+        restore = { if (it[0] == defaultDecimal) it[1] else defaultDecimal },
+    )) { mutableStateOf(defaultDecimal) }
     val context = LocalContext.current
     val hasResult = row.result.isNotBlank() || row.approximate.isNotBlank()
     val largeExpression = row.text.contains("integrate(") || row.text.contains("sum(") || row.text.contains("product(")
@@ -808,27 +819,46 @@ private fun formatNumber(n: Double) = if (n == n.toLong().toDouble()) n.toLong()
 private fun subscript(number: Int) = number.toString().map { "₀₁₂₃₄₅₆₇₈₉"[it.digitToInt()] }.joinToString("")
 
 @Composable
-private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolean, onKey: (String) -> Unit, onTemplate: (String, Int) -> Unit) {
+private fun KeyboardHeightControl(scale: Float, onChange: (Float) -> Unit) {
+    Row(Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+        Text("Keyboard height", fontSize = 11.sp, color = Muted)
+        Slider(value = scale.coerceIn(.8f, 1.4f), onValueChange = onChange, valueRange = .8f..1.4f, steps = 11,
+            modifier = Modifier.padding(horizontal = 8.dp).width(120.dp).height(32.dp)
+                .semantics { contentDescription = "Keyboard height" },
+            colors = SliderDefaults.colors(thumbColor = Blue, activeTrackColor = Blue))
+        Text("${(scale * 100).roundToInt()}%", fontSize = 11.sp, color = Muted, modifier = Modifier.width(34.dp))
+    }
+}
+
+@Composable
+private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolean, heightScale: Float,
+    onHeightChange: (Float) -> Unit, onKey: (String) -> Unit, onTemplate: (String, Int) -> Unit) {
     val calculator = layout == CalculatorLayout.Calculator
     val first = if (calculator) "aᵇ" else "x"
     val second = if (calculator) "√" else "y"
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // Reserve space for the worksheet on short screens, including landscape phones.
+    val baseHeight = if (tab == "ABC") (if (landscape) 212f else 236f) else if (landscape) 236f else 294f
+    val maximumScale = ((LocalConfiguration.current.screenHeightDp - 160f - 40f) / baseHeight).coerceIn(.8f, 1.4f)
+    val keyScale = heightScale.coerceIn(.8f, 1.4f).coerceAtMost(maximumScale)
     var keypadTop by remember { mutableIntStateOf(0) }
     Column(Modifier.fillMaxWidth().onGloballyPositioned { keypadTop = it.positionInWindow().y.roundToInt() }
         .background(Color(0xFFF0F0F0)).border(.5.dp, Border).padding(5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth().height(34.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        KeyboardHeightControl(heightScale, onHeightChange)
+        Row(Modifier.fillMaxWidth().height(34.dp * keyScale), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val shortcuts = if (calculator) listOf("a²", "π", "!", "←", "→") else listOf("aᵇ", "√", "π", "←", "→")
             shortcuts.forEach { label -> KeyTile(label, Modifier.weight(1f)) { onKey(label) } }
         }
         if (tab == "ABC") {
             listOf("qwertyuiop", "asdfghjkl", "zxcvbnm").forEach { letters ->
-                Row(Modifier.fillMaxWidth().height(if (landscape) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                Row(Modifier.fillMaxWidth().height((if (landscape) 36.dp else 44.dp) * keyScale), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     if (letters.length < 10) Spacer(Modifier.weight((10 - letters.length) / 2f))
                     letters.forEach { letter -> KeyTile(letter.toString(), Modifier.weight(1f), alphabet = true) { onKey(letter.toString()) } }
                     if (letters.length < 10) Spacer(Modifier.weight((10 - letters.length) / 2f))
                 }
             }
-            Row(Modifier.fillMaxWidth().height(44.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth().height(44.dp * keyScale), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 KeyTile("123", Modifier.weight(1.5f), gray = true) { onKey("123") }
                 KeyTile("space", Modifier.weight(4f)) { onKey("space") }
                 KeyTile("⌫", Modifier.weight(1.5f), gray = true) { onKey("⌫") }
@@ -838,7 +868,7 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
             val digits = listOf(listOf("7", "8", "9", "÷"), listOf("4", "5", "6", "×"), listOf("1", "2", "3", "−"), listOf("0", ".", "=", "+"))
             val extras = listOf(listOf(first, second, if (!calculator && is3D) "z" else "("), listOf("ABC", "funcs", if (!calculator && is3D) "()" else ")"), listOf("space", ",", "⌫"), listOf("a²", "√", "↵"))
             repeat(4) { index ->
-                Row(Modifier.fillMaxWidth().height(44.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth().height(44.dp * keyScale), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     digits[index].forEach { label -> KeyTile(label, Modifier.weight(1f), gray = label.first().isDigit()) { onKey(label) } }
                     Spacer(Modifier.width(4.dp))
                     extras[index].forEach { label ->
@@ -856,7 +886,7 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
                 listOf("ABC", "funcs", "space", "⌫", "↵"),
             )
             rows.forEach { row ->
-                Row(Modifier.fillMaxWidth().height(46.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth().height(46.dp * keyScale), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     row.forEach { label ->
                         if (label == "funcs") FunctionMenuKey(Modifier.weight(1f), onTemplate, keypadTop)
                         else KeyTile(label, Modifier.weight(if (label == "space") 1.5f else 1f),
@@ -1074,7 +1104,17 @@ private fun SettingsSheet(state: CalculatorUiState, onDismiss: () -> Unit, onAct
     var precision by remember(state.precisionDigits) { mutableStateOf(state.precisionDigits.toString()) }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White) {
         Column(Modifier.fillMaxWidth().heightIn(max = 650.dp).verticalScroll(rememberScrollState()).imePadding().padding(horizontal = 23.dp).navigationBarsPadding()) {
-            Text("Graph settings", fontSize = 23.sp, modifier = Modifier.padding(bottom = 15.dp))
+            Text("Settings", fontSize = 23.sp, modifier = Modifier.padding(bottom = 15.dp))
+            Text("Default result format", fontSize = 15.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf("Decimal" to true, "Exact" to false).forEach { (label, decimal) ->
+                    FilterChip(selected = state.defaultDecimal == decimal,
+                        onClick = { onAction(CalculatorAction.SetDefaultDecimal(decimal)) }, label = { Text(label) })
+                }
+            }
+            Text("Tap a result to switch between exact and decimal. Symbolic answers stay exact.", fontSize = 11.sp, color = Muted)
+            KeyboardHeightControl(state.keyboardHeightScale) { onAction(CalculatorAction.SetKeyboardHeightScale(it)) }
+            HorizontalDivider(Modifier.padding(vertical = 10.dp))
             SettingRow("Grid", "Show coordinate grid", state.showGrid) { onAction(CalculatorAction.SetGrid(it)) }
             SettingRow("Axes", "Show axes and labels", state.showAxes) { onAction(CalculatorAction.SetAxes(it)) }
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
@@ -1154,7 +1194,7 @@ private fun HelpSheet(onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White) {
         Column(Modifier.fillMaxWidth().heightIn(max = 610.dp).verticalScroll(rememberScrollState()).padding(horizontal = 23.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Text("Calculator guide", fontSize = 23.sp)
-            Text("Edit mathematics directly: tap a numerator, denominator, or exponent to place the cursor there. Division creates a fraction; use the arrow keys to move between slots or out of a fraction. Hold and drag to select. Typing sin, cos, sqrt, or other function names opens an argument pair automatically. The keypad adapts to calculator, 2D, and 3D modes. Tap an exact result to switch to its decimal value; long-press to copy it.", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
+            Text("Edit mathematics directly: tap a numerator, denominator, or exponent to place the cursor there. Division creates a fraction; use the arrow keys to move between slots or out of a fraction. Hold and drag to select. Typing sin, cos, sqrt, or other function names opens an argument pair automatically. The keypad adapts to calculator, 2D, and 3D modes. Decimal results appear by default; choose Decimal or Exact in Settings. Tap a result to switch formats; long-press to copy it. Use the slider above the keypad to adjust its height.", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
             Text("Symbolic mathematics is powered by Giac/Xcas and runs on your device. Use exact fractions and assumptions when you need symbolic results.", fontSize = 12.sp, color = Muted, lineHeight = 18.sp)
             listOf(
                 "2D graphs" to "y=sin(x)\nx^2+y^2=9\ny<x^2\na=2\ny=a*x^2",

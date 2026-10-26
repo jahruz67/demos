@@ -74,6 +74,9 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private var tableFitCache: Pair<TableFitKey, Map<Long, dev.demos.graphing.math.RegressionFit>>? = null
     private var restorePending = true
 
+    private data class DisplayPreferences(val layout: CalculatorLayout, val keyboardVisible: Boolean,
+        val defaultDecimal: Boolean, val keyboardHeightScale: Float)
+
     init {
         // Restore only the current document. Saved graphs are loaded when the library opens.
         // CasEngine binds lazily on the first expression that needs symbolic evaluation.
@@ -81,13 +84,17 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             val recoveryGeneration = generation
             // SharedPreferences can wait for disk on its first read. Keep both
             // preference loading and recovery decoding off the first-frame path.
-            val (layout, keyboardVisible, recovered) = withContext(Dispatchers.IO) {
+            val (display, recovered) = withContext(Dispatchers.IO) {
                 val layout = runCatching {
                     CalculatorLayout.valueOf(preferences.getString("layout", "Split") ?: "Split")
                 }.getOrDefault(CalculatorLayout.Split)
-                Triple(layout, preferences.getBoolean("keyboard-visible", layout != CalculatorLayout.Graph), repository.restoreRecovery())
+                DisplayPreferences(layout, preferences.getBoolean("keyboard-visible", layout != CalculatorLayout.Graph),
+                    preferences.getBoolean("default-decimal", true),
+                    preferences.getFloat("keyboard-height-scale", 1f).takeIf { it.isFinite() }?.coerceIn(.8f, 1.4f) ?: 1f
+                ) to repository.restoreRecovery()
             }
-            _state.value = _state.value.copy(layout = layout, keyboardVisible = keyboardVisible)
+            _state.value = _state.value.copy(layout = display.layout, keyboardVisible = display.keyboardVisible,
+                defaultDecimal = display.defaultDecimal, keyboardHeightScale = display.keyboardHeightScale)
             if (generation == recoveryGeneration && !_state.value.dirty && recovered != null) applyDocument(recovered)
             restorePending = false
             if (_state.value.dirty) changed() else scheduleEvaluation()
@@ -231,6 +238,16 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 if (_state.value.keyboardVisible == action.visible) return
                 _state.value = _state.value.copy(keyboardVisible = action.visible)
                 preferences.edit().putBoolean("keyboard-visible", action.visible).apply()
+            }
+            is CalculatorAction.SetDefaultDecimal -> {
+                _state.value = _state.value.copy(defaultDecimal = action.enabled)
+                preferences.edit().putBoolean("default-decimal", action.enabled).apply()
+            }
+            is CalculatorAction.SetKeyboardHeightScale -> {
+                if (!action.scale.isFinite()) return
+                val scale = action.scale.coerceIn(.8f, 1.4f)
+                _state.value = _state.value.copy(keyboardHeightScale = scale)
+                preferences.edit().putFloat("keyboard-height-scale", scale).apply()
             }
             is CalculatorAction.ExportGraph -> viewModelScope.launch { effectsChannel.send(CalculatorEffect.ExportGraph(action.format)) }
             CalculatorAction.ImportTable -> viewModelScope.launch { effectsChannel.send(CalculatorEffect.ImportTable) }
