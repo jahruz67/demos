@@ -28,6 +28,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
+import dev.demos.graphing.data.GraphImages
+import dev.demos.graphing.ui.parseImageData
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -45,6 +48,12 @@ import kotlin.math.*
 
 @Composable
 fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSettings=PlotSettings(),modifier:Modifier=Modifier,showControls:Boolean=true) {
+    val imageSources = expressions.mapNotNull { parseImageData(it.text) }
+    val imageContext = LocalContext.current.applicationContext
+    val imageUris = imageSources.map { it.uri }.distinct()
+    val images by produceState<Map<String, android.graphics.Bitmap>>(emptyMap(), imageUris) {
+        value = withContext(Dispatchers.IO) { imageUris.mapNotNull { source -> GraphImages.decode(imageContext, source)?.let { source to it } }.toMap() }
+    }
     var center by rememberSaveable(stateSaver=Saver<Offset,List<Float>>(save={listOf(it.x,it.y)},restore={Offset(it[0],it[1])})) {mutableStateOf(Offset.Zero)}
     var viewWidth by rememberSaveable {mutableDoubleStateOf(20.0)}
     var viewHeightOverride by rememberSaveable {mutableStateOf<Double?>(null)}
@@ -82,7 +91,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
         if(appliedBounds!=bounds) {reset2D();appliedBounds=bounds}
     }
     val program by produceState<PlotProgram?>(null,expressions,settings) {
-        value=withContext(Dispatchers.Default) {PlotProgram.compile(expressions,settings)}
+        value=withContext(Dispatchers.Default) {PlotProgram.compile(expressions.filter { parseImageData(it.text) == null },settings)}
     }
     LaunchedEffect(program,is3D,view,size.width) {
         val compiled=program?:return@LaunchedEffect
@@ -202,6 +211,16 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                 fun sx(x:Double)=((x-view.left)/view.width*size.width).toFloat()
                 fun sy(y:Double)=((view.top-y)/view.height*size.height).toFloat()
                 val scale=size.width/view.width
+                for (image in imageSources) {
+                    val bitmap = images[image.uri] ?: continue
+                    val canvas = drawContext.canvas.nativeCanvas
+                    val save = canvas.save()
+                    canvas.rotate((-image.angle).toFloat(), sx(image.x), sy(image.y))
+                    val destination = android.graphics.RectF(sx(image.x - image.width / 2), sy(image.y + image.height / 2), sx(image.x + image.width / 2), sy(image.y - image.height / 2))
+                    val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { alpha = (image.opacity.coerceIn(0.0, 1.0) * 255).toInt() }
+                    canvas.drawBitmap(bitmap, null, destination, imagePaint)
+                    canvas.restoreToCount(save)
+                }
                 val major=niceStep(90*density/scale)
                 val minor=major/5
                 val majorY=niceStep(90*density/(size.height/view.height))

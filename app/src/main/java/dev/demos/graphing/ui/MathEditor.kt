@@ -54,7 +54,8 @@ private data class MathHit(val offset: Int, val position: Offset, val height: Fl
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, modifier: Modifier = Modifier,
-    onInput: (TextFieldValue) -> Unit, onFocus: (Boolean) -> Unit, onSelect: () -> Unit) {
+    onInput: (TextFieldValue) -> Unit, onFocus: (Boolean) -> Unit, onSelect: () -> Unit,
+    fontSize: Int = 26, minimumHeight: androidx.compose.ui.unit.Dp = 48.dp, placeholder: String = "Type an expression") {
     val tree = remember(value.text) { editableMath(value.text) }
     val slots = remember(tree) { tree.slots() }
     val owner = slots.firstOrNull { value.selection.end in it.start..it.end }
@@ -88,7 +89,7 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
         BasicTextField(value = value, onValueChange = onInput, singleLine = true,
             textStyle = TextStyle(fontSize = 26.sp, color = Color.Transparent), cursorBrush = SolidColor(Color.Transparent),
             keyboardOptions = KeyboardOptions(showKeyboardOnFocus = false),
-            modifier = modifier.heightIn(min = 48.dp).focusRequester(focus).onFocusChanged { onFocus(it.isFocused) }
+            modifier = modifier.heightIn(min = minimumHeight).focusRequester(focus).onFocusChanged { onFocus(it.isFocused) }
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) false else when (event.key) {
                         Key.Backspace -> { onInput(MathInputRules.backspace(value)); true }
@@ -124,8 +125,8 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
                                 nearest(viewportOrigin + change.position - Offset(scroll.value.toFloat(), 0f))?.let { choose(it, true) }
                             })
                         }) {
-                        if (value.text.isEmpty()) Text("Type an expression", color = Color(0xFFAAAAAA), fontSize = 18.sp)
-                        MathEditorNode(tree, value, 26, owner, selected && caretVisible, hits,
+                        if (value.text.isEmpty() && placeholder.isNotEmpty()) Text(placeholder, color = Color(0xFFAAAAAA), fontSize = 18.sp)
+                        MathEditorNode(tree, value, fontSize, owner, selected && caretVisible, hits,
                             onChoose = { choose(it) })
                     }
                 }

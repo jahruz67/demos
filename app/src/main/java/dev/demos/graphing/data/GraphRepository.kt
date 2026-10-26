@@ -9,7 +9,7 @@ import java.io.File
 import java.util.UUID
 
 @Serializable
-data class StoredExpression(val id: Long, val text: String, val color: Int, val hidden: Boolean = false)
+data class StoredExpression(val id: Long, val text: String, val color: Int, val hidden: Boolean = false, val folderId: Long? = null)
 
 @Serializable
 data class GraphDocument(
@@ -26,6 +26,7 @@ data class GraphDocument(
     val parameters: Map<String, Double> = emptyMap(),
     val viewBounds: Map<String, Double> = emptyMap(),
     val updatedAt: Long = System.currentTimeMillis(),
+    val sliderSettings: Map<String, dev.demos.graphing.ui.SliderConfiguration> = emptyMap(),
 )
 
 class GraphRepository(context: Context) {

@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import dev.demos.graphing.plot.GraphPlot
 import dev.demos.graphing.plot.PlotSettings
+import dev.demos.graphing.data.GraphImages
 import dev.demos.graphing.ui.CalculatorScreen
 import dev.demos.graphing.ui.CalculatorLayout
 import dev.demos.graphing.ui.GraphExportFormat
@@ -87,6 +88,23 @@ class MainActivity : ComponentActivity() {
                 contentResolver.openInputStream(uri)?.use { readDocument(it, 1_000_000) }
                     ?: error("The selected file could not be opened")
             } }.onSuccess(model::importTable).onFailure { model.showMessage("Import failed: ${it.message}") }
+        }
+    }
+
+    private val importImage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val bitmap = GraphImages.decode(this@MainActivity, uri.toString()) ?: error("Choose a supported image")
+                    try {
+                        val directory = File(filesDir, "graph-images").apply { mkdirs() }
+                        val file = File(directory, "${java.util.UUID.randomUUID()}.png")
+                        file.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                        Triple(Uri.fromFile(file).toString(), "Image", bitmap.width.toDouble() / bitmap.height)
+                    } finally { bitmap.recycle() }
+                }
+            }.onSuccess { (source, name, aspect) -> model.importImage(source, name, aspect) }
+                .onFailure { model.showMessage("Could not add image: ${it.message}") }
         }
     }
 
@@ -176,6 +194,7 @@ class MainActivity : ComponentActivity() {
                         CalculatorEffect.ExportImage -> captureGraph(GraphExportFormat.PNG, share = true)
                         is CalculatorEffect.ExportGraph -> captureGraph(effect.format)
                         CalculatorEffect.ImportTable -> importTable.launch(arrayOf("text/*", "application/json", "application/vnd.ms-excel", "application/octet-stream"))
+                        CalculatorEffect.ImportImage -> importImage.launch(arrayOf("image/*"))
                         is CalculatorEffect.ExportTable -> {
                             if (pendingFile != null || capturing) model.showMessage("Finish the current export first")
                             else {

@@ -1,5 +1,6 @@
 package dev.demos.graphing.ui
 
+import kotlinx.serialization.Serializable
 data class ExpressionRow(
     val id: Long,
     val text: String,
@@ -9,6 +10,7 @@ data class ExpressionRow(
     val color: Int = 0xFFC74440.toInt(),
     val isEvaluating: Boolean = false,
     val hidden: Boolean = false,
+    val folderId: Long? = null,
 )
 
 data class SavedGraph(val id: String, val title: String, val updatedAt: Long)
@@ -28,7 +30,16 @@ data class SliderUi(
     val max: Double = 10.0,
     val step: Double = 0.1,
     val playing: Boolean = false,
+    val animation: SliderAnimation = SliderAnimation.Oscillate,
+    val speed: Double = 1.0,
 )
+
+@Serializable
+enum class SliderAnimation { Oscillate, Forward, Reverse, Once }
+
+@Serializable
+data class SliderConfiguration(val min: Double = -10.0, val max: Double = 10.0, val step: Double = 0.0,
+    val animation: SliderAnimation = SliderAnimation.Oscillate, val speed: Double = 1.0)
 
 data class GraphBounds(
     val xMin: Double? = null, val xMax: Double? = null,
@@ -59,13 +70,20 @@ data class CalculatorUiState(
     val statusMessage: String? = null,
     val layout: CalculatorLayout = CalculatorLayout.Split,
     val keyboardVisible: Boolean = true,
+    val sliderSettings: Map<String, SliderConfiguration> = emptyMap(),
+    val tableFits: Map<Long, dev.demos.graphing.math.RegressionFit> = emptyMap(),
 )
 
 sealed interface CalculatorAction {
     data class EditRow(val id: Long, val text: String) : CalculatorAction
     data class SelectRow(val id: Long) : CalculatorAction
     data object AddRow : CalculatorAction
+    data class AddItem(val source: String) : CalculatorAction
+    data object ImportImage : CalculatorAction
+    data class CreateSliders(val names: List<String>) : CalculatorAction
+    data class ConfigureSlider(val name: String, val configuration: SliderConfiguration) : CalculatorAction
     data class DeleteRow(val id: Long) : CalculatorAction
+    data class MoveRow(val id: Long, val direction: Int) : CalculatorAction
     data class ToggleVisibility(val id: Long) : CalculatorAction
     data class SetColor(val id: Long, val color: Int) : CalculatorAction
     data object Undo : CalculatorAction

@@ -35,6 +35,8 @@ data class PlotProgram(val relations:List<PlotRelation>,val context:EvaluationCo
             val constants=HashMap<String,Double>().apply { put("C",0.0);putAll(settings.parameters) }
             val functions=HashMap<String,NumericFunction>()
             val context=EvaluationContext(constants,functions,settings.radians)
+            val declared=MathSyntax.symbols(expressions.map {it.text})
+            val symbols=declared.copy(variables=declared.variables+settings.parameters.keys)
             val relations=ArrayList<PlotRelation>()
             val assignments=ArrayList<Pair<String,CompiledExpression>>()
             for(expression in expressions) {
@@ -57,32 +59,31 @@ data class PlotProgram(val relations:List<PlotRelation>,val context:EvaluationCo
                         if(columns.all {it.size==1 || it.size==count}) {
                             for(i in 0 until count) {
                                 try {
-                                    val coordinates=columns.map {column -> NumericCompiler.compile(column[if(column.size==1) 0 else i],settings.radians)}
+                                    val coordinates=columns.map {column -> NumericCompiler.compile(column[if(column.size==1) 0 else i],settings.radians,symbols)}
                                     relations.add(PlotRelation(expression.id,expression.color,PlotKind.POINT,coordinates))
                                 } catch (_:IllegalArgumentException) { } catch (_:IllegalStateException) { }
                             }
                         }
                         continue
                     }
-                    val functionDefinition=Regex("^([A-Za-z][A-Za-z0-9_]*)\\(([^()]*)\\)\\s*=([^=].*)$").matchEntire(s)
-                    if(functionDefinition!=null) {
-                        val name=functionDefinition.groupValues[1]
-                        val parameters=functionDefinition.groupValues[2].split(',').map {it.trim()}
-                        if(parameters.all {it.matches(Regex("[A-Za-z][A-Za-z0-9_]*"))}) {
-                            functions[name]=NumericFunction(parameters,NumericCompiler.compile(functionDefinition.groupValues[3],settings.radians))
-                            if(parameters==listOf("x")) relations.add(PlotRelation(expression.id,expression.color,PlotKind.Y_FUNCTION,listOf(NumericCompiler.compile("$name(x)",settings.radians))))
-                            continue
-                        }
+                    val definition=MathSyntax.definition(s)
+                    val parameters=definition?.parameters
+                    if(definition!=null && parameters!=null) {
+                        val name=definition.name
+                        val functionSymbols=symbols.copy(variables=symbols.variables+parameters)
+                        functions[name]=NumericFunction(parameters,NumericCompiler.compile(definition.body,settings.radians,functionSymbols))
+                        if(parameters==listOf("x")) relations.add(PlotRelation(expression.id,expression.color,PlotKind.Y_FUNCTION,listOf(NumericCompiler.compile("$name(x)",settings.radians,symbols))))
+                        continue
                     }
                     val relation=findRelation(s)
                     val lhs=relation?.let {s.substring(0,it.first).trim()}
                     val op=relation?.second
                     val rhs=relation?.let {s.substring(it.first+it.second.length).trim()}
-                    if(lhs!=null && rhs!=null && op=="=" && lhs.matches(Regex("[A-Za-z][A-Za-z0-9_]*")) && lhs !in setOf("x","y","z","r")) {
-                        if(lhs !in settings.parameters) assignments.add(lhs to NumericCompiler.compile(rhs,settings.radians))
+                    if(definition!=null && parameters==null && definition.name !in setOf("x","y","z","r","theta")) {
+                        if(definition.name !in settings.parameters) assignments.add(definition.name to NumericCompiler.compile(definition.body,settings.radians,symbols))
                         continue
                     }
-                    fun compiled(v:String)=NumericCompiler.compile(v,settings.radians)
+                    fun compiled(v:String)=NumericCompiler.compile(v,settings.radians,symbols)
                     val tuple=splitTuple(s)
                     val item=when {
                         tuple!=null -> {

@@ -4,31 +4,13 @@ import kotlin.math.*
 
 /** A small, independent real-valued evaluator used by plotting. CAS is evaluated separately. */
 object NumericCompiler {
-    private val functionPrefixRegex = Regex("\\\\(sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|ln|log|exp|sqrt|abs)")
-
-    fun compile(source: String, radians: Boolean = true): CompiledExpression {
-        val parser = Parser(normalize(source))
+    fun compile(source: String, radians: Boolean = true, symbols: MathSyntax.Symbols = MathSyntax.Symbols()): CompiledExpression {
+        val parser = Parser(MathSyntax.explicitProducts(normalize(source), symbols))
         return CompiledExpression(parser.parse(), radians)
     }
 
     fun normalize(source: String): String {
-        var s = LatexSyntax.normalize(source).trim().replace("−", "-").replace("–", "-").replace("×", "*")
-            .replace("·", "*").replace("÷", "/").replace("π", "pi").replace("θ", "theta")
-            .replace("∞", "Infinity").replace("\\left", "").replace("\\right", "")
-            .replace("\\cdot", "*").replace("\\times", "*")
-        s = s.replace(functionPrefixRegex, "$1")
-        s = s.replace(Regex("\\binfinity\\b"), "Infinity")
-        val superscripts = mapOf('⁰' to '0','¹' to '1','²' to '2','³' to '3','⁴' to '4','⁵' to '5','⁶' to '6','⁷' to '7','⁸' to '8','⁹' to '9','⁻' to '-')
-        val out = StringBuilder()
-        var inPower = false
-        for (c in s) {
-            if (c in superscripts) {
-                if (!inPower) { out.append("^("); inPower = true }
-                out.append(superscripts.getValue(c))
-            } else { if (inPower) { out.append(')'); inPower = false }; out.append(c) }
-        }
-        if (inPower) out.append(')')
-        return out.toString()
+        return MathSyntax.normalize(source).replace(Regex("\\binfinity\\b"), "Infinity")
     }
 }
 
@@ -50,7 +32,9 @@ class EvaluationContext(
     fun variable(name: String): Double = locals[name] ?: constants[name] ?: when (name) {
         "x" -> x; "y" -> y; "z" -> z; "t", "theta" -> t
         "pi" -> PI; "e" -> E; "Infinity" -> Double.POSITIVE_INFINITY
-        else -> if (name.length > 1 && name.all { it.isLetter() }) name.fold(1.0) { a, c -> a * variable(c.toString()) } else Double.NaN
+        // A named quantity must have the same meaning in Giac and on the graph.
+        // Separate factors with whitespace or a multiplication sign.
+        else -> Double.NaN
     }
 }
 
@@ -111,6 +95,17 @@ private data class Call(val name: String, val args: List<Node>): Node {
         }
         if (name == "if" && args.size == 3) return if (args[0].eval(c) != 0.0) args[1].eval(c) else args[2].eval(c)
         val values = args.map { it.eval(c) }
+        val function = c.functions[name]
+        if (function != null) {
+            if (function.parameters.size != values.size || c.depth > 32) return Double.NaN
+            val previous = function.parameters.map { c.locals[it] }
+            function.parameters.forEachIndexed { i,p -> c.locals[p] = values[i] }
+            c.depth++
+            return try { function.expression.evaluate(c) } finally {
+                c.depth--
+                function.parameters.forEachIndexed { i,p -> if(previous[i] == null) c.locals.remove(p) else c.locals[p] = previous[i]!! }
+            }
+        }
         val a = values.firstOrNull() ?: return Double.NaN
         val b = values.getOrNull(1) ?: Double.NaN
         val angle = if (c.radians) a else a * PI / 180
@@ -130,17 +125,7 @@ private data class Call(val name: String, val args: List<Node>): Node {
             "sign", "signum" -> sign(a); "min" -> values.minOrNull() ?: Double.NaN
             "max" -> values.maxOrNull() ?: Double.NaN; "mod" -> ((a % b) + b) % b
             "pow" -> realPower(a,b); "hypot" -> hypot(a,b); "factorial" -> factorial(a)
-            else -> {
-                val function = c.functions[name] ?: return Double.NaN
-                if (function.parameters.size != values.size || c.depth > 32) return Double.NaN
-                val previous = function.parameters.map { c.locals[it] }
-                function.parameters.forEachIndexed { i,p -> c.locals[p] = values[i] }
-                c.depth++
-                try { function.expression.evaluate(c) } finally {
-                    c.depth--
-                    function.parameters.forEachIndexed { i,p -> if(previous[i] == null) c.locals.remove(p) else c.locals[p] = previous[i]!! }
-                }
-            }
+            else -> Double.NaN
         }
     }
 }
@@ -243,7 +228,7 @@ private class Parser(private val source:String) {
             }
             token.text=="|" -> {val inner=expression(0);expect("|");Call("abs",listOf(inner))}
             token.text.firstOrNull()?.let {it.isLetter() || it=='_'}==true && token.text!="END" -> {
-                if(peek()=="(" && (token.text in builtins || token.text.length>1 || token.text !in setOf("x","y","z","t","a","b","c","r","e"))) {
+                if(peek()=="(") {
                     take(); val arguments=ArrayList<Node>()
                     if(peek()!=")") {arguments.add(expression(0));while(peek()==",") {take();arguments.add(expression(0))}}
                     expect(")");Call(token.text,arguments)
@@ -274,5 +259,5 @@ private class Parser(private val source:String) {
         return lhs
     }
     private fun startsAtom(token:Token)=token.number!=null || token.text=="(" || token.text=="[" || (token.text!="END" && token.text.firstOrNull()?.let {it.isLetter() || it=='_'}==true)
-    private val builtins=setOf("sin","cos","tan","asin","acos","atan","arcsin","arccos","arctan","sinh","cosh","tanh","asinh","acosh","atanh","sec","csc","cot","sqrt","cbrt","surd","nthroot","root","abs","exp","ln","log","log2","log10","floor","ceil","ceiling","round","sign","signum","min","max","mod","pow","hypot","factorial","atan2","integrate","integral","int","if")
+    private val builtins=MathSyntax.functions
 }

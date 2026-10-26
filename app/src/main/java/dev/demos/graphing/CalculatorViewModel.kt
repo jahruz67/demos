@@ -12,7 +12,10 @@ import dev.demos.graphing.data.GraphRepository
 import dev.demos.graphing.data.StoredExpression
 import dev.demos.graphing.data.TableFiles
 import dev.demos.graphing.math.FastArithmetic
+import dev.demos.graphing.math.MathSyntax
 import dev.demos.graphing.math.NumericCompiler
+import dev.demos.graphing.math.TableEvaluation
+import dev.demos.graphing.math.TableRegression
 import dev.demos.graphing.plot.PlotExpression
 import dev.demos.graphing.ui.*
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +39,7 @@ sealed interface CalculatorEffect {
     data class ExportTable(val name: String, val contents: String, val format: TableFileFormat) : CalculatorEffect
     data object ImportTable : CalculatorEffect
     data object ImportDocument : CalculatorEffect
+    data object ImportImage : CalculatorEffect
 }
 
 class CalculatorViewModel(application: Application) : AndroidViewModel(application) {
@@ -69,6 +73,8 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private val completed = mutableMapOf<Long, Pair<EvaluationKey, CasResult>>()
     private val pending = mutableMapOf<Long, EvaluationKey>()
     private val requested = mutableMapOf<Long, EvaluationKey>()
+    private data class TableFitKey(val sources: List<Pair<Long, String>>, val parameters: Map<String, Double>, val radians: Boolean)
+    private var tableFitCache: Pair<TableFitKey, Map<Long, dev.demos.graphing.math.RegressionFit>>? = null
     private var restorePending = true
 
     init {
@@ -99,18 +105,51 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 changed()
             }
             is CalculatorAction.SelectRow -> _state.value = _state.value.copy(activeId = action.id)
-            CalculatorAction.AddRow -> {
+            CalculatorAction.AddRow -> insertItem("", reuseEmpty = false)
+            is CalculatorAction.AddItem -> insertItem(action.source)
+            CalculatorAction.ImportImage -> viewModelScope.launch { effectsChannel.send(CalculatorEffect.ImportImage) }
+            is CalculatorAction.CreateSliders -> {
                 rememberUndo()
-                val row = newRow(nextId++)
-                _state.value = _state.value.copy(rows = _state.value.rows + row, activeId = row.id, dirty = true)
+                val rows = _state.value.rows.toMutableList()
+                var index = rows.indexOfFirst { it.id == _state.value.activeId }.let { if (it < 0) rows.size else it + 1 }
+                val parent = rows.firstOrNull { it.id == _state.value.activeId }?.folderId
+                action.names.distinct().filter { name -> name.matches(Regex("[A-Za-z][A-Za-z0-9_]*")) && rows.none { MathSyntax.definition(it.text)?.name == name } }.forEach { name ->
+                    rows.add(index++, newRow(nextId++).copy(text = "$name=1", folderId = parent))
+                }
+                _state.value = _state.value.copy(rows = rows, activeId = rows.getOrNull(index - 1)?.id ?: _state.value.activeId, dirty = true)
                 changed()
+            }
+            is CalculatorAction.ConfigureSlider -> {
+                val config = action.configuration
+                if (!config.min.isFinite() || !config.max.isFinite() || config.min >= config.max || !config.step.isFinite() || config.step < 0 || !config.speed.isFinite() || config.speed <= 0) return
+                val restart = action.name in animations && _state.value.sliders.firstOrNull { it.name == action.name }?.animation != config.animation
+                rememberUndo()
+                _state.value = _state.value.copy(sliderSettings = _state.value.sliderSettings + (action.name to config), dirty = true)
+                changed(evaluate = false)
+                _state.value.sliders.find { it.name == action.name }?.let { setSlider(it.name, it.value.coerceIn(config.min, config.max)) }
+                if (restart) { toggleAnimation(action.name); toggleAnimation(action.name) }
             }
             is CalculatorAction.DeleteRow -> {
                 rememberUndo()
                 val oldRows = _state.value.rows
                 val position = oldRows.indexOfFirst { it.id == action.id }
-                val rows = oldRows.filterNot { it.id == action.id }.ifEmpty { listOf(newRow(nextId++)) }
+                val rows = oldRows.filterNot { it.id == action.id || it.folderId == action.id }.ifEmpty { listOf(newRow(nextId++)) }
                 _state.value = _state.value.copy(rows = rows, activeId = rows[position.coerceIn(0, rows.lastIndex)].id, dirty = true)
+                changed()
+            }
+            is CalculatorAction.MoveRow -> {
+                val rows = _state.value.rows
+                val row = rows.firstOrNull { it.id == action.id } ?: return
+                val siblings = rows.filter { it.folderId == row.folderId }
+                val index = siblings.indexOf(row)
+                val neighbor = siblings.getOrNull(index + if (action.direction < 0) -1 else 1) ?: return
+                val block = rows.filter { it.id == row.id || it.folderId == row.id }
+                val remaining = rows.filterNot { item -> block.any { it.id == item.id } }.toMutableList()
+                val destination = if (action.direction < 0) remaining.indexOfFirst { it.id == neighbor.id } else
+                    remaining.indexOfLast { it.id == neighbor.id || it.folderId == neighbor.id } + 1
+                rememberUndo()
+                remaining.addAll(destination.coerceIn(0, remaining.size), block)
+                _state.value = _state.value.copy(rows = remaining, dirty = true)
                 changed()
             }
             is CalculatorAction.ToggleVisibility -> {
@@ -245,13 +284,55 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
 
     fun showMessage(message: String) { _state.value = _state.value.copy(statusMessage = message) }
 
-    fun plotExpressions(current: CalculatorUiState): List<PlotExpression> = current.rows.filterNot { it.hidden }.map { row ->
-        val normalized = row.text.trim()
+    private fun insertItem(source: String, reuseEmpty: Boolean = true) {
+        rememberUndo()
+        val snapshot = _state.value
+        val rows = snapshot.rows.toMutableList()
+        val position = rows.indexOfFirst { it.id == snapshot.activeId }.coerceAtLeast(0)
+        val active = rows[position]
+        val folder = parseFolderData(active.text)
+        val parent = if (folder != null) active.id else active.folderId
+        if (folder?.collapsed == true) rows[position] = active.copy(text = encodeFolderData(folder.copy(collapsed = false)))
+        val isTable = parseTableData(source) != null
+        val row = if (reuseEmpty && active.text.isBlank()) active.copy(text = source,
+            color = if (isTable) 0xFF2D70B3.toInt() else active.color) else
+            newRow(nextId++).copy(text = source, folderId = parent, color = if (isTable) 0xFF2D70B3.toInt() else newRow(nextId - 1).color)
+        if (row.id == active.id) rows[position] = row else rows.add(position + 1, row)
+        _state.value = snapshot.copy(rows = rows, activeId = row.id, dirty = true,
+            layout = if (snapshot.layout == CalculatorLayout.Graph) CalculatorLayout.Split else snapshot.layout)
+        changed()
+    }
+
+    fun importImage(uri: String, name: String, aspect: Double) {
+        insertItem(encodeImageData(ImageData(uri = uri, name = name, height = 10.0 / aspect.coerceIn(0.01, 100.0))))
+    }
+
+    fun plotExpressions(current: CalculatorUiState): List<PlotExpression> = current.rows.filterNot { (it.hidden && parseTableData(it.text) == null) || current.rows.any { parent -> parent.id == it.folderId && parent.hidden } }.flatMap { row ->
+        val table = parseTableData(row.text)
+        if (table != null) {
+            val number = current.rows.takeWhile { it.id != row.id }.count { parseTableData(it.text) != null } + 1
+            val columns = TableEvaluation.columns(table, number, plotParameters(current), !current.degreeMode)
+            return@flatMap buildList {
+                for (column in 1 until columns.size) {
+                    if (column == 1 && row.hidden) continue
+                    if (column > 1 && table.options.extraColumns[column - 2].hidden) continue
+                    val pairs = columns[0].indices.mapNotNull { i -> columns[0][i]?.let { x -> columns[column].getOrNull(i)?.let { x to it } } }
+                    if (pairs.isNotEmpty()) add(PlotExpression(row.id, "table([${pairs.joinToString(",") { TableRegression.number(it.first) }}],[${pairs.joinToString(",") { TableRegression.number(it.second) }}])",
+                        if (column == 1) row.color else table.options.extraColumns[column - 2].color))
+                }
+                current.tableFits[row.id]?.let { fit ->
+                    if (!table.options.regressionHidden) add(PlotExpression(row.id, "y=${fit.expression}", table.options.regressionColor))
+                    if (table.options.residuals) add(PlotExpression(row.id, "table([${fit.x.joinToString(",", transform = TableRegression::number)}],[${fit.residuals.joinToString(",", transform = TableRegression::number)}])", 0xFF388C46.toInt()))
+                }
+            }
+        }
+        if (parseNoteText(row.text) != null || parseFolderData(row.text) != null || parseInferenceData(row.text) != null) return@flatMap emptyList()
+        val normalized = runCatching { MathSyntax.normalize(row.text) }.getOrDefault(row.text).trim()
         val symbolic = normalized.startsWith("∫") || normalized.startsWith("\\int") ||
             symbolicPrefixRegex.containsMatchIn(normalized)
         val derived = derivedPlots[row.id]?.takeIf { it.first == row.text }?.second
         val plotSource = derived ?: if (symbolic && row.result.isNotBlank() && row.error == null) row.result else row.text
-        PlotExpression(row.id, plotSource.replace(integralTrailingCRegex, "+C"), row.color)
+        listOf(PlotExpression(row.id, plotSource.replace(integralTrailingCRegex, "+C"), row.color))
     }
 
     fun plotParameters(current: CalculatorUiState): Map<String, Double> {
@@ -284,18 +365,43 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         val currentGeneration = ++generation
         val snapshot = _state.value
         evaluationJob = viewModelScope.launch {
+            val parameters = snapshot.sliders.associate { it.name to it.value }
+            val fitKey = TableFitKey(snapshot.rows.filter { parseTableData(it.text) != null }.map { it.id to it.text }, parameters, !snapshot.degreeMode)
+            val fits = tableFitCache?.takeIf { it.first == fitKey }?.second ?: withContext(Dispatchers.Default) {
+                snapshot.rows.mapNotNull { row ->
+                    val table = parseTableData(row.text) ?: return@mapNotNull null
+                    val model = table.options.regression ?: return@mapNotNull null
+                    val index = snapshot.rows.takeWhile { it.id != row.id }.count { parseTableData(it.text) != null } + 1
+                    TableRegression.fit(model, TableEvaluation.pairs(table, index, parameters, !snapshot.degreeMode), table.options.logMode)?.let { row.id to it }
+                }.toMap()
+            }
+            if (currentGeneration != generation) return@launch
+            tableFitCache = fitKey to fits
+            _state.value = _state.value.copy(tableFits = fits)
             val evaluations = withContext(Dispatchers.Default) {
                 val tableDefinitions = snapshot.rows.mapNotNull { parseTableData(it.text) }.flatMapIndexed { index, table ->
                     val number = index + 1
-                    val valid = (0 until table.size).filter { table.x.getOrNull(it)?.isNotBlank() == true && table.y.getOrNull(it)?.isNotBlank() == true }
-                    listOf("x_$number:=[${valid.joinToString(",") { table.x[it] }}]", "y_$number:=[${valid.joinToString(",") { table.y[it] }}]")
+                    val columns = TableEvaluation.columns(table, number, parameters, !snapshot.degreeMode)
+                    columns.mapIndexedNotNull { column, values ->
+                        val name = table.header(column, number).substringBefore('=').trim()
+                        if (!Regex("[A-Za-z][A-Za-z0-9_]*").matches(name)) null else "$name:=[${values.filterNotNull().joinToString(",", transform = TableRegression::number)}]"
+                    }
+                } + snapshot.rows.mapIndexedNotNull { index, row ->
+                    val fit = fits[row.id] ?: return@mapIndexedNotNull null
+                    val number = snapshot.rows.take(index + 1).count { parseTableData(it.text) != null }
+                    "e_$number:=[${fit.residuals.joinToString(",", transform = TableRegression::number)}]"
                 }
                 val definitions = snapshot.rows.mapNotNull { row -> definition(row.text)?.let { row.id to it } }
                 val regressions = snapshot.rows.mapNotNull { row -> CasSyntax.regressionDefinition(row.text)?.let { row.id to it } }
                 snapshot.rows.filter {
-                    it.text.isNotBlank() && parseTableData(it.text) == null && parseNoteText(it.text) == null && parseFolderData(it.text) == null
+                    it.text.isNotBlank() && parseTableData(it.text) == null && parseNoteText(it.text) == null && parseFolderData(it.text) == null && parseImageData(it.text) == null && parseInferenceData(it.text) == null
                 }.map { row ->
-                    val fast = FastArithmetic.evaluate(row.text, snapshot.precisionDigits) ?: incompleteResult(row.text)
+                    val numeric = if (!row.text.contains('=') && !row.text.contains('~')) runCatching {
+                        val compiled = NumericCompiler.compile(row.text, !snapshot.degreeMode, MathSyntax.Symbols(variables = parameters.keys))
+                        if (compiled.variables.isNotEmpty() && compiled.variables.all { it in parameters }) compiled.evaluate(parameters).takeIf { it.isFinite() }?.let { CasResult(row.text, TableRegression.number(it)) } else null
+                    }.getOrNull() else null
+                    val isSlider = runCatching { MathSyntax.definition(row.text)?.name?.let { name -> snapshot.sliders.any { it.name == name } } == true }.getOrDefault(false)
+                    val fast = if (isSlider) CasResult(row.text, "") else numeric ?: FastArithmetic.evaluate(row.text, snapshot.precisionDigits) ?: incompleteResult(row.text)
                     val context = if (fast != null) listOf("Digits:=${snapshot.precisionDigits}") else
                         listOf("angle_radian:=${if (snapshot.degreeMode) 0 else 1}",
                             "complex_mode:=${if (snapshot.complexMode) 1 else 0}", "Digits:=${snapshot.precisionDigits}") +
@@ -353,7 +459,8 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private fun incompleteResult(source: String): CasResult? {
         val text = source.trim()
         if (text.lastOrNull()?.let { it in "+-*/^=,×÷−" } == true ||
-            Regex("[(,]\\s*[,)]").containsMatchIn(text)) return CasResult(source, "")
+            Regex("[(,]\\s*,|,\\s*\\)").containsMatchIn(text) ||
+            MathSyntax.unaryFunctions.any { Regex("\\b$it\\s*\\(\\s*\\)").containsMatchIn(text) }) return CasResult(source, "")
         var depth = 0
         for (c in text) {
             if (c == '(' || c == '[' || c == '{') depth++
@@ -377,11 +484,9 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun definition(source: String): String? {
-        val trimmed = source.trim()
-        val match = definitionRegex.matchEntire(trimmed) ?: return null
-        val name = match.groupValues[1]
-        if (name in setOf("x", "y", "z", "r", "theta")) return null
-        return "$name:=${match.groupValues[2]}"
+        val parsed = runCatching { MathSyntax.definition(source) }.getOrNull() ?: return null
+        if (parsed.name in setOf("x", "y", "z", "r", "theta")) return null
+        return "${parsed.target}:=${parsed.body}"
     }
 
     private fun rememberUndo(editedId: Long = -1) {
@@ -416,7 +521,8 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
 
     private fun document(): GraphDocument = GraphDocument(
         id = graphId, title = _state.value.title,
-        expressions = _state.value.rows.map { StoredExpression(it.id, it.text, it.color, it.hidden) },
+        expressions = _state.value.rows.map { StoredExpression(it.id, it.text, it.color, it.hidden, it.folderId) },
+        sliderSettings = _state.value.sliderSettings,
         is3D = _state.value.is3D, degreeMode = _state.value.degreeMode,
         showGrid = _state.value.showGrid, showAxes = _state.value.showAxes,
         parameters = mapOf("C" to integrationConstant),
@@ -430,15 +536,16 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         engine.cancelPending()
         completed.clear(); pending.clear(); requested.clear()
         derivedPlots.clear()
+        tableFitCache = null
         graphId = doc.id
         integrationConstant = doc.parameters["C"] ?: 0.0
-        val rows = doc.expressions.map { ExpressionRow(it.id, it.text, color = it.color, hidden = it.hidden) }.ifEmpty { listOf(newRow(1)) }
+        val rows = doc.expressions.map { ExpressionRow(it.id, it.text, color = it.color, hidden = it.hidden, folderId = it.folderId) }.ifEmpty { listOf(newRow(1)) }
         nextId = (rows.maxOfOrNull { it.id } ?: 0) + 1
         _state.value = _state.value.copy(rows = rows, activeId = rows.first().id, title = doc.title,
             is3D = doc.is3D, degreeMode = doc.degreeMode, showGrid = doc.showGrid, showAxes = doc.showAxes,
             precisionDigits = doc.precisionDigits, complexMode = doc.complexMode,
             bounds = with(doc.viewBounds) { GraphBounds(get("xMin"), get("xMax"), get("yMin"), get("yMax"), get("zMin"), get("zMax"), get("tMin") ?: -10.0, get("tMax") ?: 10.0, get("uMin") ?: -5.0, get("uMax") ?: 5.0, get("vMin") ?: -5.0, get("vMax") ?: 5.0) },
-            dirty = dirty, canUndo = undo.isNotEmpty(), canRedo = redo.isNotEmpty(), statusMessage = null)
+            dirty = dirty, canUndo = undo.isNotEmpty(), canRedo = redo.isNotEmpty(), statusMessage = null, sliderSettings = doc.sliderSettings, tableFits = emptyMap())
         updateSliders()
     }
 
@@ -446,14 +553,18 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         val previous = _state.value.sliders.associateBy { it.name }
         val values = mutableMapOf<String, Double>()
         val sliders = _state.value.rows.mapNotNull { row ->
-            val match = sliderRegex.matchEntire(row.text.trim()) ?: return@mapNotNull null
-            val name = match.groupValues[1]
-            if (name in setOf("e", "i")) return@mapNotNull null
-            val value = runCatching { NumericCompiler.compile(match.groupValues[2]).evaluate(values) }.getOrNull()
+            val assignment = runCatching { MathSyntax.definition(row.text) }.getOrNull() ?: return@mapNotNull null
+            if (assignment.parameters != null) return@mapNotNull null
+            val name = assignment.name
+            if (name in setOf("x", "y", "z", "r", "theta", "e", "i", "pi")) return@mapNotNull null
+            val value = runCatching { NumericCompiler.compile(assignment.body,
+                symbols = MathSyntax.Symbols(variables = values.keys + name)).evaluate(values) }.getOrNull()
                 ?.takeIf { it.isFinite() } ?: return@mapNotNull null
             values[name] = value
             val old = previous[name]
-            SliderUi(name, value, min = old?.min ?: -max(10.0, abs(value) * 2), max = old?.max ?: max(10.0, abs(value) * 2), playing = name in animations)
+            val config = _state.value.sliderSettings[name]
+            SliderUi(name, value, min = config?.min ?: old?.min ?: -max(10.0, abs(value) * 2), max = config?.max ?: old?.max ?: max(10.0, abs(value) * 2),
+                step = config?.step ?: 0.0, playing = name in animations, animation = config?.animation ?: SliderAnimation.Oscillate, speed = config?.speed ?: 1.0)
         }.toMutableList()
         if (_state.value.rows.any { it.result.contains(integrationConstantRegex) } && sliders.none { it.name == "C" }) {
             sliders.add(SliderUi("C", integrationConstant, playing = "C" in animations))
@@ -470,21 +581,31 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             recoveryJob = viewModelScope.launch { delay(450); withContext(Dispatchers.IO) { repository.saveRecovery(snapshot) } }
             return
         }
-        val regex = Regex("^${Regex.escape(name)}\\s*(?::=|=)")
-        val row = _state.value.rows.find { regex.containsMatchIn(it.text.trim()) } ?: return
+        val row = _state.value.rows.find { runCatching { MathSyntax.definition(it.text)?.let { definition ->
+            definition.name == name && definition.parameters == null
+        } }.getOrNull() == true } ?: return
         onAction(CalculatorAction.EditRow(row.id, "$name=${number(value)}"))
     }
 
     private fun toggleAnimation(name: String) {
         animations.remove(name)?.let { it.cancel(); updateSliders(); return }
         animations[name] = viewModelScope.launch {
-            var direction = 1
+            var direction = if (_state.value.sliders.find { it.name == name }?.animation == SliderAnimation.Reverse) -1 else 1
             while (true) {
                 val slider = _state.value.sliders.find { it.name == name } ?: break
-                var value = slider.value + slider.step * direction
-                if (value > slider.max || value < slider.min) { direction *= -1; value = value.coerceIn(slider.min, slider.max) }
+                val increment = if (slider.step > 0) slider.step else (slider.max - slider.min) / 200
+                var value = slider.value + increment * direction * (if (slider.step > 0) 1.0 else slider.speed)
+                if (value > slider.max || value < slider.min) {
+                    when (slider.animation) {
+                        SliderAnimation.Oscillate -> { direction *= -1; value = value.coerceIn(slider.min, slider.max) }
+                        SliderAnimation.Forward -> value = slider.min
+                        SliderAnimation.Reverse -> value = slider.max
+                        SliderAnimation.Once -> { setSlider(name, value.coerceIn(slider.min, slider.max)); animations.remove(name); updateSliders(); break }
+                    }
+                }
+                if (slider.step > 0) value = (slider.min + kotlin.math.round((value - slider.min) / slider.step) * slider.step).coerceIn(slider.min, slider.max)
                 setSlider(name, value)
-                delay(60)
+                delay(if (slider.step > 0) (60 / slider.speed).toLong().coerceAtLeast(16) else 60)
             }
         }
         updateSliders()
@@ -500,8 +621,6 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         private val palette = intArrayOf(0xFFC74440.toInt(), 0xFF2D70B3.toInt(), 0xFF6042A6.toInt(), 0xFF388C46.toInt(), 0xFFFA7E19.toInt(), 0xFF000000.toInt())
         private val symbolicPrefixRegex = Regex("^(integrate|int|integral|diff|derive|simplify|factor|expand|normal|partfrac)\\s*\\(")
         private val integralTrailingCRegex = Regex("\\s*\\+\\s*C$")
-        private val definitionRegex = Regex("^([A-Za-z][A-Za-z0-9_]*(?:\\([^=]*\\))?)\\s*(?::=|=)\\s*(.+)$")
-        private val sliderRegex = Regex("^([a-wA-Z])\\s*(?::=|=)\\s*(.+)$")
         private val integrationConstantRegex = Regex("\\bC\\b")
         private val whitespaceRegex = Regex("\\s+")
         private val safeFileNameRegex = Regex("[^\\p{L}\\p{N} _.-]")

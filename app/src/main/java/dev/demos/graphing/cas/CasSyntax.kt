@@ -1,6 +1,6 @@
 package dev.demos.graphing.cas
 
-import dev.demos.graphing.math.LatexSyntax
+import dev.demos.graphing.math.MathSyntax
 
 /** Normalizes symbolic input for Giac; basic arithmetic also has a local exact path. */
 object CasSyntax {
@@ -10,22 +10,8 @@ object CasSyntax {
         val parameters get() = listOfNotNull(slope, intercept)
     }
 
-    fun prepare(input: String): Prepared {
-        var text = LatexSyntax.normalize(input).trim()
-            .replace("\\left", "").replace("\\right", "")
-            .replace("\\cdot", "*").replace("\\times", "*")
-            .replace("\\pi", "pi").replace("\\infty", "infinity")
-            .replace("\\mathrm{d}", "d")
-            .replace("\\ln", "ln").replace("\\sin", "sin")
-            .replace("\\cos", "cos").replace("\\tan", "tan")
-            .replace("\\,", " ").replace("\\!", "")
-            .replace('×', '*').replace('·', '*').replace('÷', '/')
-            .replace('−', '-').replace("π", "pi")
-            .replace("∞", "infinity").replace("≤", "<=").replace("≥", ">=")
-            .replace("≠", "!=").replace("²", "^2").replace("³", "^3")
-            .replace("⁴", "^4").replace("⁵", "^5")
-        text = replaceSimpleLatex(text)
-        text = text.replace("\\int", "∫")
+    fun prepare(input: String, symbols: MathSyntax.Symbols = MathSyntax.Symbols()): Prepared {
+        var text = MathSyntax.normalize(input)
         var isIndefinite = false
         if (text.startsWith("∫")) {
             val integral = parseIntegral(text)
@@ -43,10 +29,13 @@ object CasSyntax {
         require(text.isNotBlank()) { "Enter an expression" }
         require(text.length <= 16_000) { "Expression is too long" }
         validateDelimiters(text)
+        val parameters = MathSyntax.definition(input)?.parameters.orEmpty()
+        val localSymbols = symbols.copy(variables = symbols.variables + parameters)
+        text = MathSyntax.giacFunctions(MathSyntax.explicitProducts(text, localSymbols))
         return Prepared(text, isIndefinite, regression?.parameters.orEmpty())
     }
 
-    fun normalize(input: String): String = prepare(input).expression
+    fun normalize(input: String, symbols: MathSyntax.Symbols = MathSyntax.Symbols()): String = prepare(input, symbols).expression
 
     /** Bind fit parameters in the same native context as the dependent expression. */
     fun regressionDefinition(input: String): String? {
@@ -131,19 +120,6 @@ object CasSyntax {
         }
         parts += text.substring(start).trim()
         return parts
-    }
-
-    private fun replaceSimpleLatex(text: String): String {
-        var value = text
-        // Escape closing braces explicitly; Android's regex engine rejects the
-        // otherwise accepted bare '}' used by some desktop Java runtimes.
-        val fraction = Regex("\\\\frac\\{([^{}]*)\\}\\{([^{}]*)\\}")
-        val root = Regex("\\\\sqrt\\{([^{}]*)\\}")
-        repeat(8) {
-            value = value.replace(fraction) { "((${it.groupValues[1]})/(${it.groupValues[2]}))" }
-            value = value.replace(root) { "sqrt(${it.groupValues[1]})" }
-        }
-        return value.replace(Regex("\\^\\{([^{}]*)\\}")) { "^(${it.groupValues[1]})" }
     }
 
     private fun validateDelimiters(text: String) {

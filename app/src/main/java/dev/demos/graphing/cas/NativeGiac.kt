@@ -1,6 +1,7 @@
 package dev.demos.graphing.cas
 
 import javagiac.giacJNI
+import dev.demos.graphing.math.MathSyntax
 
 data class CasResult(
     val input: String,
@@ -24,13 +25,15 @@ internal object NativeGiac {
 
     fun evaluate(input: String, definitions: List<String> = emptyList()): CasResult {
         load()
-        val prepared = CasSyntax.prepare(input)
+        val requiredDefinitions = MathSyntax.relevantDefinitions(input, definitions)
+        val symbols = MathSyntax.symbols(requiredDefinitions)
+        val prepared = CasSyntax.prepare(input, symbols)
         val context = giacJNI.new_context__SWIG_0()
         check(context != 0L) { "Could not create the CAS context" }
         try {
             // A fresh context ensures deleted/edited definitions never leak into later results.
-            definitions.forEach { definition ->
-                val value = evaluatePointer(CasSyntax.normalize(definition), context)
+            requiredDefinitions.forEach { definition ->
+                val value = evaluatePointer(CasSyntax.normalize(definition, symbols), context)
                 try {
                     val error = errorMessage(value, context)
                     require(error == null) { "Definition: $error" }
@@ -54,7 +57,7 @@ internal object NativeGiac {
                     try {
                         val printed = giacJNI.gen_print__SWIG_0(decimal, null, context, null).trim()
                         // Show a decimal only for a scalar constant, not a rounded symbolic formula.
-                        if (printed != raw && !Regex("[a-hj-zA-HJ-Z_]", RegexOption.IGNORE_CASE).containsMatchIn(printed.replace("infinity", ""))) {
+                        if (printed != raw && MathSyntax.isScalarNumber(printed)) {
                             approximate = printed
                         }
                     } finally { giacJNI.delete_gen(decimal) }
@@ -84,7 +87,7 @@ internal object NativeGiac {
             return text.trim('"').take(500)
         }
         return when {
-            Regex("\\bundef\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "Undefined result. Check the expression and its domain."
+            text.equals("undef", ignoreCase = true) -> "Undefined result. Check the expression and its domain."
             text.contains("error", ignoreCase = true) && text.startsWith('"') -> text.trim('"').take(500)
             else -> null
         }

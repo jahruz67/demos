@@ -9,10 +9,10 @@ import java.math.MathContext
 object FastArithmetic {
     fun evaluate(source: String, digits: Int): CasResult? {
         if (source.length > 512) return null
-        val normalized = runCatching { LatexSyntax.normalize(source) }.getOrNull() ?: return null
-        if (normalized.any { it !in "0123456789.+-*/^() \t\n\r−×÷" }) return null
+        val normalized = runCatching { MathSyntax.explicitProducts(MathSyntax.normalize(source)) }.getOrNull() ?: return null
+        if (normalized.any { it !in "0123456789.eE+-*/^() \t\n\r" }) return null
         return runCatching {
-            val value = Parser(normalized.replace('−', '-').replace('×', '*').replace('÷', '/')).parse()
+            val value = Parser(normalized).parse()
             val exact = if (value.d == BigInteger.ONE) value.n.toString() else "${value.n}/${value.d}"
             val approximate = if (value.d == BigInteger.ONE) "" else
                 BigDecimal(value.n).divide(BigDecimal(value.d), MathContext(digits.coerceIn(10, 1000)))
@@ -77,8 +77,18 @@ object FastArithmetic {
             val start = at
             while (at < text.length && (text[at].isDigit() || text[at] == '.')) at++
             require(at > start)
+            if (at < text.length && text[at] in "eE") {
+                at++
+                if (at < text.length && text[at] in "+-") at++
+                val exponentStart = at
+                while (at < text.length && text[at].isDigit()) at++
+                require(at > exponentStart)
+            }
             val value = BigDecimal(text.substring(start, at))
-            return fraction(value.unscaledValue(), BigInteger.TEN.pow(value.scale()))
+            // Bound scientific exponents before allocating a large power of ten.
+            require(value.scale() in -600..600)
+            return if (value.scale() >= 0) fraction(value.unscaledValue(), BigInteger.TEN.pow(value.scale()))
+                else fraction(value.unscaledValue() * BigInteger.TEN.pow(-value.scale()), BigInteger.ONE)
         }
     }
 }
