@@ -112,6 +112,7 @@ fun CalculatorScreen(
     var showHelp by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
     var editingList by remember { mutableStateOf(false) }
+    var appendRequested by remember { mutableStateOf(false) }
     var tableEditing by remember { mutableStateOf<TableCellSelection?>(null) }
     var tableValue by remember { mutableStateOf(TextFieldValue()) }
     val configuration = LocalConfiguration.current
@@ -174,7 +175,10 @@ fun CalculatorScreen(
         val current = latestState.rows.firstOrNull { it.id == row.id } ?: return
         if (parseTableData(current.text) != null || parseNoteText(current.text) != null || parseFolderData(current.text) != null || parseImageData(current.text) != null || parseInferenceData(current.text) != null) return
         if (value.text == row.text && current.text != row.text) return
-        val next = if (complete) MathInputRules.apply(editorValue(current), value) else value
+        val next = if (complete && value.text != current.text) {
+            val symbols = dev.demos.graphing.math.MathSyntax.symbols(latestState.rows.map { it.text })
+            MathInputRules.apply(editorValue(current), value, symbols.variables + symbols.functions)
+        } else value
         editorValues[row.id] = next
         onAction(CalculatorAction.SelectRow(row.id))
         onAction(CalculatorAction.EditRow(row.id, next.text))
@@ -282,7 +286,12 @@ fun CalculatorScreen(
             "√" -> edit("sqrt()", 1)
             "()" -> edit("()", 1)
             "|a|" -> edit("abs()", 1)
-            "π" -> edit("pi")
+            "π" -> {
+                val row = state.rows.firstOrNull { it.id == state.activeId } ?: return
+                val cell = tableEditing?.takeIf { it.id == row.id }
+                if (cell != null) updateTableInput(cell, MathInputRules.insertConstant(tableValue, "π"))
+                else updateInput(row, MathInputRules.insertConstant(editorValue(row), "π"), complete = false)
+            }
             "×" -> edit("*")
             "÷" -> edit("/")
             "−" -> edit("-")
@@ -421,7 +430,16 @@ fun CalculatorScreen(
                     LaunchedEffect(state.rows.map { it.id }, state.activeId) {
                         val inserted = knownRows.isNotEmpty() && state.activeId !in knownRows
                         knownRows = state.rows.map { it.id }.toSet()
-                        if (inserted) state.rows.indexOfFirst { it.id == state.activeId }.takeIf { it >= 0 }?.let { listState.animateScrollToItem(it) }
+                        if (inserted && appendRequested) {
+                            appendRequested = false
+                            val index = state.rows.indexOfFirst { it.id == state.activeId }
+                            val layout = listState.layoutInfo
+                            val item = layout.visibleItemsInfo.firstOrNull { it.index == index }
+                            if (index >= 0 && (item == null || item.offset + item.size > layout.viewportEndOffset)) {
+                                val height = item?.size ?: with(density) { 72.dp.roundToPx() }
+                                listState.animateScrollToItem(index, -(layout.viewportEndOffset - height).coerceAtLeast(0))
+                            }
+                        }
                     }
                     CompositionLocalProvider(LocalBringIntoViewSpec provides ManualScrollSpec) {
                         LazyColumn(Modifier.fillMaxSize(), state = listState) {
@@ -506,7 +524,8 @@ fun CalculatorScreen(
                                 }
                             }
                             item {
-                                Row(Modifier.fillMaxWidth().height(48.dp).clickable { tableEditing = null; onAction(CalculatorAction.AddRow); setKeyboardVisible(true) }) {
+                                Row(Modifier.fillMaxWidth().height(48.dp).semantics { contentDescription = "Add expression at end" }
+                                    .clickable { tableEditing = null; appendRequested = true; onAction(CalculatorAction.AppendRow); setKeyboardVisible(true) }) {
                                     Box(Modifier.width(35.dp).fillMaxHeight().background(Brush.verticalGradient(listOf(Color(0xFFEEEEEE), Color.White)))) {
                                         Text("${state.rows.size + 1}", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(start = 3.dp, top = 3.dp))
                                     }
@@ -626,9 +645,9 @@ private fun ExpressionToolbar(canUndo: Boolean, canRedo: Boolean, keyboardVisibl
 @Composable
 private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, value: TextFieldValue, graphable: Boolean, onInput: (TextFieldValue) -> Unit, onInputFocus: (Boolean) -> Unit, onSelect: () -> Unit, onDelete: () -> Unit, onVisibility: () -> Unit, onColor: () -> Unit,
     slider: SliderUi? = null, missingVariables: List<String> = emptyList(), onAction: (CalculatorAction) -> Unit, onSettingsFocus: (Boolean) -> Unit = {}) {
-    var decimal by remember(row.id) { mutableStateOf(false) }
+    var decimal by rememberSaveable(row.id) { mutableStateOf(false) }
     val context = LocalContext.current
-    val hasResult = row.result.isNotBlank()
+    val hasResult = row.result.isNotBlank() || row.approximate.isNotBlank()
     val largeExpression = row.text.contains("integrate(") || row.text.contains("sum(") || row.text.contains("product(")
     val minimumHeight = if (largeExpression) 84.dp else 52.dp
     Column(Modifier.fillMaxWidth().border(if (selected) 1.dp else .5.dp, if (selected) Blue else Border)) {
@@ -684,16 +703,18 @@ private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, v
                 } else if (row.error != null) {
                     Text(row.error, color = Color(0xFFB8532D), fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(end = 12.dp, top = 4.dp, bottom = 5.dp))
                 } else if (hasResult) {
-                    val result = if (decimal && row.approximate.isNotBlank()) row.approximate else row.result
+                    val showingDecimal = row.result.isBlank() || decimal && row.approximate.isNotBlank()
+                    val result = if (showingDecimal) row.approximate else row.result
                     Row(Modifier.fillMaxWidth().padding(top = 5.dp, end = 5.dp, bottom = 1.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                        if (row.approximate.isNotBlank() && row.approximate != row.result) {
-                            Text(if (decimal) "≈" else "=", color = Color(0xFF999999), fontSize = 18.sp, modifier = Modifier.padding(end = 6.dp).clickable { decimal = !decimal })
-                        } else Text("=", color = Color(0xFF999999), fontSize = 18.sp, modifier = Modifier.padding(end = 6.dp))
+                        if (row.result.isNotBlank() && row.approximate.isNotBlank() && row.approximate != row.result) {
+                            Text(if (showingDecimal) "≈" else "=", color = Color(0xFF999999), fontSize = 18.sp, modifier = Modifier.padding(end = 6.dp).clickable { decimal = !decimal })
+                        } else Text(if (showingDecimal) "≈" else "=", color = Color(0xFF999999), fontSize = 18.sp, modifier = Modifier.padding(end = 6.dp))
                         Box(Modifier.widthIn(max = 250.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFFF7F7F7)).border(.7.dp, Border, RoundedCornerShape(4.dp))
+                            .semantics { contentDescription = "Result $number" }
                             .combinedClickable(onClick = { decimal = !decimal }, onLongClick = {
                                 (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Result", result))
                             }).padding(horizontal = 7.dp, vertical = 3.dp)) {
-                            MathExpression(result, 19)
+                            MathExpression(formatResultNumber(result), 19)
                         }
                     }
                 }
@@ -871,7 +892,6 @@ internal fun KeyTile(label: String, modifier: Modifier = Modifier, gray: Boolean
 @Composable
 internal fun MathExpression(source: String, fontSize: Int = 24, showCursor: Boolean = false, cursor: Int = source.length) {
     val integral = parseIntegral(source)
-    val display = remember(source) { mathDisplay(source) }
     if (integral != null) {
         val args = integral.second
         val variable = args.getOrElse(1) { "x" }.ifBlank { "x" }
@@ -899,8 +919,8 @@ internal fun MathExpression(source: String, fontSize: Int = 24, showCursor: Bool
                 if (showCursor && cursor >= source.length) MathCaret(fontSize)
             }
         }
-    } else if (!showCursor && display.hasFraction()) {
-        RenderMathDisplay(display, fontSize)
+    } else if (!showCursor) {
+        StructuredMath(source, fontSize)
     } else {
         Row(verticalAlignment = Alignment.CenterVertically) {
             val at = cursor.coerceIn(0, source.length)

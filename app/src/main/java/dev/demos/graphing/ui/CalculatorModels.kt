@@ -85,6 +85,7 @@ sealed interface CalculatorAction {
     data class SortTable(val id: Long) : CalculatorAction
     data class SelectRow(val id: Long) : CalculatorAction
     data object AddRow : CalculatorAction
+    data object AppendRow : CalculatorAction
     data class AddItem(val source: String) : CalculatorAction
     data object ImportImage : CalculatorAction
     data class CreateSliders(val names: List<String>) : CalculatorAction

@@ -9,7 +9,7 @@ object MathInputRules {
         "asinh", "acosh", "atanh", "sec", "csc", "cot", "ln", "log", "exp", "sqrt", "abs")
     private val identifier = Regex("[A-Za-z]+$")
 
-    fun apply(previous: TextFieldValue, proposed: TextFieldValue): TextFieldValue {
+    fun apply(previous: TextFieldValue, proposed: TextFieldValue, knownNames: Set<String> = emptySet()): TextFieldValue {
         if (proposed.composition != null || !proposed.selection.collapsed) return proposed
         val start = previous.selection.min
         val selectionEnd = previous.selection.max
@@ -32,7 +32,7 @@ object MathInputRules {
                 val deleted = deleteSelection(previous)
                 val at = deleted.selection.end
                 val replacement = TextFieldValue(deleted.text.replaceRange(at, at, insertion), TextRange(at + insertion.length))
-                return if (insertion.length == 1) apply(deleted, replacement) else replacement
+                return if (insertion.length == 1) apply(deleted, replacement, knownNames) else replacement
             }
             return proposed
         }
@@ -70,13 +70,34 @@ object MathInputRules {
         if (latex && name.value in setOf("frac", "dfrac", "tfrac")) {
             return proposed.copy(text = proposed.text.take(end) + "{}{}" + proposed.text.drop(end), selection = TextRange(end + 1))
         }
-        if (name.value !in functions || proposed.text.getOrNull(end) in listOf('(', '{')) return proposed
-        val pair = if (latex && name.value == "sqrt") "{}" else "()"
-        return proposed.copy(text = proposed.text.take(end) + pair + proposed.text.drop(end), selection = TextRange(end + 1))
+        // Only split conventional coordinate/constant prefixes; ordinary names such as
+        // catalog and user-defined multi-letter identifiers remain intact.
+        val function = if (name.value in functions) name.value else if (!latex && name.value !in knownNames) functions.sortedByDescending { it.length }
+            .firstOrNull { name.value.endsWith(it) && name.value.removeSuffix(it) in setOf("x", "y", "z", "t", "u", "v", "r", "pi", "e") }
+            else null
+        if (function == null) return proposed
+        val split = name.value.length - function.length
+        val boundary = name.range.first + split
+        val separated = if (split > 0) proposed.text.substring(0, boundary) + "*" + proposed.text.substring(boundary) else proposed.text
+        val nextEnd = end + if (split > 0) 1 else 0
+        if (separated.getOrNull(nextEnd) in listOf('(', '{')) return proposed.copy(text = separated, selection = TextRange(nextEnd))
+        val pair = if (latex && function == "sqrt") "{}" else "()"
+        return proposed.copy(text = separated.take(nextEnd) + pair + separated.drop(nextEnd), selection = TextRange(nextEnd + 1))
+    }
+
+    fun insertConstant(value: TextFieldValue, symbol: String): TextFieldValue {
+        val base = if (value.selection.collapsed) value else deleteSelection(value)
+        val at = base.selection.end
+        val left = base.text.getOrNull(at - 1)
+        val right = base.text.getOrNull(at)
+        val before = if (left != null && (left.isLetterOrDigit() || left in ")]!}π")) "*" else ""
+        val after = if (right != null && (right.isLetterOrDigit() || right in "([{\\π")) "*" else ""
+        val insertion = before + symbol + after
+        return TextFieldValue(base.text.replaceRange(at, at, insertion), TextRange(at + before.length + symbol.length))
     }
 
     fun move(value: TextFieldValue, direction: Int): TextFieldValue {
-        val offsets = editableMath(value.text).slots().flatMap { (it.start..it.end).toList() }.distinct().sorted()
+        val offsets = editableMath(value.text).caretOffsets(value.text)
         val next = if (direction < 0) offsets.lastOrNull { it < value.selection.end } else offsets.firstOrNull { it > value.selection.end }
         return value.copy(selection = TextRange(next ?: value.selection.end))
     }

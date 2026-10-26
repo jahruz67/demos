@@ -27,7 +27,7 @@ internal fun missingSliderVariables(source: String, state: CalculatorUiState): L
     val declared = MathSyntax.symbols(state.rows.filter { parseTableData(it.text) == null && parseNoteText(it.text) == null && parseFolderData(it.text) == null && parseImageData(it.text) == null && parseInferenceData(it.text) == null }.map { it.text })
     val tableNames = state.rows.mapNotNull { parseTableData(it.text) }.flatMapIndexed { index, table -> (0 until table.columnCount).map { table.header(it, index + 1).substringBefore('=').trim() } }.toSet()
     val compiled = NumericCompiler.compile(definition?.body ?: source, !state.degreeMode, declared)
-    (compiled.variables - declared.variables - tableNames - setOf("x", "y", "z", "r", "theta", "pi", "e", "i", "C"))
+    (compiled.variables - declared.variables - tableNames - MathSyntax.functions - setOf("x", "y", "z", "r", "theta", "pi", "e", "i", "C"))
         .filter { it.matches(Regex("[A-Za-z][A-Za-z0-9_]*")) }.sorted().take(6)
 }.getOrDefault(emptyList())
 

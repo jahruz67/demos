@@ -33,7 +33,7 @@ class CalculatorInteractionTest {
                         if (it.id == action.id) it.copy(text = action.text) else it
                     })
                     is CalculatorAction.SetKeyboardVisible -> state.value.copy(keyboardVisible = action.visible)
-                    CalculatorAction.AddRow -> {
+                    CalculatorAction.AddRow, CalculatorAction.AppendRow -> {
                         val id = state.value.rows.maxOf { it.id } + 1
                         state.value.copy(rows = state.value.rows + ExpressionRow(id, ""), activeId = id)
                     }
@@ -93,5 +93,43 @@ class CalculatorInteractionTest {
         list.performTouchInput { swipe(Offset(10f, height - 10f), Offset(10f, 10f), 300L) }
         compose.waitForIdle()
         assertTrue(scrollPosition() > before)
+    }
+
+    @Test fun tappingTheBottomAreaRequestsAppendRatherThanInsertAfterSelection() {
+        val actions = mutableListOf<CalculatorAction>()
+        compose.setContent {
+            CalculatorScreen(CalculatorUiState(listOf(ExpressionRow(1, "100"), ExpressionRow(2, "200")), 1,
+                layout = CalculatorLayout.Calculator), onAction = { actions += it }, graph = { _, _ -> })
+        }
+        compose.onNodeWithContentDescription("Add expression at end").performTouchInput { click(center) }
+        compose.runOnIdle {
+            assertTrue(actions.contains(CalculatorAction.AppendRow))
+            assertFalse(actions.contains(CalculatorAction.AddRow))
+        }
+    }
+
+    @Test fun decimalChoiceSurvivesScrollingTheResultOutOfTheList() {
+        worksheet(listOf(ExpressionRow(1, "sqrt(2)", result = "sqrt(2)", approximate = "1.414213562373095")) +
+            (2L..30L).map { ExpressionRow(it, it.toString()) })
+        compose.onNodeWithContentDescription("Result 1").performClick()
+        compose.onNodeWithText("1.414213562373095", useUnmergedTree = true).assertIsDisplayed()
+        val list = compose.onNode(hasScrollToIndexAction())
+        list.performScrollToIndex(29)
+        list.performScrollToIndex(0)
+        compose.onNodeWithText("1.414213562373095", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test fun anApproximationRemainsVisibleWhenTheExactAnswerIsUnchangedOrAbsent() {
+        worksheet(listOf(ExpressionRow(1, "pi", approximate = "0.3141592653589793e1")))
+        compose.onNodeWithContentDescription("Result 1").assertIsDisplayed()
+        compose.onNodeWithText("3.141592653589793", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test fun piKeyKeepsTheConstantSeparateFromAdjacentText() {
+        worksheet(listOf(ExpressionRow(1, "x")))
+        compose.onNodeWithContentDescription("π").performClick()
+        compose.onNodeWithContentDescription("π").performClick()
+        compose.onNodeWithContentDescription("Equation 1").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, androidx.compose.ui.text.AnnotatedString("x*π*π")))
     }
 }

@@ -117,6 +117,15 @@ object LatexVisualTransformation : VisualTransformation {
                     at += 4
                     continue
                 }
+                val symbol = listOf("pi", "theta").firstOrNull { name ->
+                    source.startsWith(name, at) && (at == start || !source[at - 1].isLetterOrDigit() && source[at - 1] != '_') &&
+                        (at + name.length == end || !source[at + name.length].isLetterOrDigit() && source[at + name.length] != '_')
+                }
+                if (symbol != null) {
+                    emit(at, at + symbol.length, symbols.getValue(symbol), style)
+                    at += symbol.length
+                    continue
+                }
                 if (c == '^' || c == '_') {
                     val argument = group(at + 1, end)
                     if (argument != null) {

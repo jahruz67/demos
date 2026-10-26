@@ -80,4 +80,31 @@ class MathEditingTest {
         assertEquals(EditableMath.Text(6, 7), root.index)
         assertEquals(EditableMath.Text(9, 10), root.body)
     }
+
+    @Test fun functionsCompleteAfterCoordinatesAndConstantsWithoutSplittingOrdinaryNames() {
+        assertEquals("x*log()", type(TextFieldValue(), "xlog").text)
+        assertEquals("pi*log()", type(TextFieldValue(), "pilog").text)
+        assertEquals("x log()", type(TextFieldValue(), "x log").text)
+        assertEquals("x*sinh()", type(TextFieldValue(), "xsinh").text)
+        assertEquals("catalog", type(TextFieldValue(), "catalog").text)
+        assertEquals("xlog", MathInputRules.apply(TextFieldValue("xlo", TextRange(3)),
+            TextFieldValue("xlog", TextRange(4)), setOf("xlog")).text)
+    }
+
+    @Test fun piInsertionKeepsAdjacentTokensSeparateAndReplacesSelections() {
+        val source = "pilog()"
+        val first = MathInputRules.insertConstant(TextFieldValue(source, TextRange(2)), "π")
+        assertEquals("pi*π*log()", first.text)
+        val second = MathInputRules.insertConstant(first, "π")
+        assertEquals("pi*π*π*log()", second.text)
+        assertEquals("π", MathInputRules.insertConstant(TextFieldValue("900", TextRange(0, 3)), "π").text)
+        assertEquals(2 * kotlin.math.PI, NumericCompiler.compile(MathInputRules.insertConstant(TextFieldValue("2", TextRange(1)), "π").text).evaluate(), 1e-12)
+    }
+
+    @Test fun symbolOffsetsAndStructureBoundariesAreReachableWithoutInvisibleStops() {
+        val pi = TextFieldValue("pi", TextRange(0))
+        assertEquals(2, MathInputRules.move(pi, 1).selection.end)
+        assertEquals(0, MathInputRules.move(pi.copy(selection = TextRange(2)), -1).selection.end)
+        assertTrue(editableMath("sqrt(2)").caretOffsets("sqrt(2)").containsAll(listOf(0, 5, 6, 7)))
+    }
 }

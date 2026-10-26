@@ -138,6 +138,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             }
             is CalculatorAction.SelectRow -> if (_state.value.rows.any { it.id == action.id }) _state.value = _state.value.copy(activeId = action.id)
             CalculatorAction.AddRow -> insertItem("", reuseEmpty = false)
+            CalculatorAction.AppendRow -> insertItem("", reuseEmpty = false, append = true)
             is CalculatorAction.AddItem -> insertItem(action.source)
             CalculatorAction.ImportImage -> viewModelScope.launch { effectsChannel.send(CalculatorEffect.ImportImage) }
             is CalculatorAction.CreateSliders -> {
@@ -332,15 +333,15 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         changed()
     }
 
-    private fun insertItem(source: String, reuseEmpty: Boolean = true) {
+    private fun insertItem(source: String, reuseEmpty: Boolean = true, append: Boolean = false) {
         rememberUndo()
         val snapshot = _state.value
         val rows = snapshot.rows.toMutableList()
-        val position = rows.indexOfFirst { it.id == snapshot.activeId }.coerceAtLeast(0)
+        val position = if (append) rows.lastIndex else rows.indexOfFirst { it.id == snapshot.activeId }.coerceAtLeast(0)
         val active = rows[position]
         val folder = parseFolderData(active.text)
-        val parent = if (folder != null) active.id else active.folderId
-        if (folder?.collapsed == true) rows[position] = active.copy(text = encodeFolderData(folder.copy(collapsed = false)))
+        val parent = if (append) null else if (folder != null) active.id else active.folderId
+        if (!append && folder?.collapsed == true) rows[position] = active.copy(text = encodeFolderData(folder.copy(collapsed = false)))
         val isTable = parseTableData(source) != null
         val row = if (reuseEmpty && active.text.isBlank()) active.copy(text = source,
             color = if (isTable) 0xFF2D70B3.toInt() else active.color) else
@@ -524,7 +525,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         if (result.error == null && result.plotExpression != null) derivedPlots[id] = source to result.plotExpression
         else derivedPlots.remove(id)
         val unchanged = compact(exact) == compact(source) || compact(exact) == compact(source.replace("=", ":="))
-        val displayed = if (unchanged && result.error == null) "" else exact
+        val displayed = if (unchanged && result.error == null && result.approximate.isBlank()) "" else exact
         if (row.result == displayed && row.approximate == result.approximate && row.error == result.error && !row.isEvaluating) return
         _state.value = _state.value.copy(rows = _state.value.rows.map {
             if (it.id == row.id) it.copy(result = displayed, approximate = result.approximate, error = result.error, isEvaluating = false) else it
