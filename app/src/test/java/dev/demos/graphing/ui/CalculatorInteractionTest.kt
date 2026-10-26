@@ -147,27 +147,39 @@ class CalculatorInteractionTest {
         compose.onNodeWithText("1.414213562373095", useUnmergedTree = true).assertIsDisplayed()
     }
 
-    @Test fun heightSliderResizesNumericAndAlphabeticKeys() {
+    @Test fun draggingTheHandleResizesNumericAndAlphabeticKeys() {
         worksheet(listOf(ExpressionRow(1, "")))
+        compose.onNodeWithText("Keyboard height").assertDoesNotExist()
+        compose.onNodeWithText("100%").assertDoesNotExist()
         val numberHeight = compose.onNodeWithContentDescription("7").fetchSemanticsNode().boundsInRoot.height
-        compose.onNodeWithContentDescription("Keyboard height").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(1.4f) }
-        compose.onNodeWithText("140%").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Resize keyboard").performTouchInput {
+            down(center)
+            advanceEventTime(500)
+            moveBy(Offset(0f, -90f))
+            moveBy(Offset(0f, -90f))
+            up()
+        }
         assertTrue(compose.onNodeWithContentDescription("7").fetchSemanticsNode().boundsInRoot.height > numberHeight)
         compose.onNodeWithContentDescription("ABC").performClick()
         val letterHeight = compose.onNodeWithContentDescription("q").fetchSemanticsNode().boundsInRoot.height
-        compose.onNodeWithContentDescription("Keyboard height").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(.8f) }
-        compose.onNodeWithText("80%").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Resize keyboard").performTouchInput {
+            down(center)
+            advanceEventTime(500)
+            moveBy(Offset(0f, 90f))
+            moveBy(Offset(0f, 90f))
+            up()
+        }
         assertTrue(compose.onNodeWithContentDescription("q").fetchSemanticsNode().boundsInRoot.height < letterHeight)
         compose.onNodeWithContentDescription("Equation 1").assertIsDisplayed()
     }
 
     @Test @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
-    fun heightSliderAlsoResizesLandscapeKeys() = heightSliderResizesNumericAndAlphabeticKeys()
+    fun draggingTheHandleAlsoResizesLandscapeKeys() = draggingTheHandleResizesNumericAndAlphabeticKeys()
 
     @Test @Config(qualifiers = "w640dp-h360dp-land-mdpi")
     fun maximumKeyboardHeightKeepsTheWorksheetAndKeysVisibleOnAShortScreen() {
         worksheet(listOf(ExpressionRow(1, "")))
-        compose.onNodeWithContentDescription("Keyboard height").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(1.4f) }
+        compose.onNodeWithContentDescription("Resize keyboard").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(1.4f) }
         compose.onNodeWithContentDescription("Equation 1").assertIsDisplayed()
         compose.onNodeWithContentDescription("7").assertIsDisplayed()
         compose.onNodeWithContentDescription("New expression").assertIsDisplayed()

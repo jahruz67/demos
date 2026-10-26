@@ -58,6 +58,10 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
@@ -839,13 +843,34 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
     val second = if (calculator) "√" else "y"
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     // Reserve space for the worksheet on short screens, including landscape phones.
-    val baseHeight = if (tab == "ABC") (if (landscape) 212f else 236f) else if (landscape) 236f else 294f
-    val maximumScale = ((LocalConfiguration.current.screenHeightDp - 160f - 40f) / baseHeight).coerceIn(.8f, 1.4f)
+    val keyRowsHeight = if (tab == "ABC") (if (landscape) 186f else 210f) else if (landscape) 210f else 264f
+    val spacingHeight = if (tab == "ABC" || landscape) 30f else 34f
+    val maximumScale = ((LocalConfiguration.current.screenHeightDp - 160f - 20f - spacingHeight) / keyRowsHeight).coerceIn(.8f, 1.4f)
     val keyScale = heightScale.coerceIn(.8f, 1.4f).coerceAtMost(maximumScale)
+    val density = LocalDensity.current
+    var dragScale by remember { mutableFloatStateOf(keyScale) }
+    val resizeState = rememberDraggableState { delta ->
+        dragScale = (dragScale - with(density) { delta.toDp().value } / keyRowsHeight).coerceIn(.8f, maximumScale)
+        onHeightChange(dragScale)
+    }
     var keypadTop by remember { mutableIntStateOf(0) }
     Column(Modifier.fillMaxWidth().onGloballyPositioned { keypadTop = it.positionInWindow().y.roundToInt() }
         .background(Color(0xFFF0F0F0)).border(.5.dp, Border).padding(5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        KeyboardHeightControl(heightScale, onHeightChange)
+        Box(Modifier.fillMaxWidth().height(20.dp)
+            .draggable(resizeState, Orientation.Vertical, onDragStarted = { dragScale = keyScale })
+            .semantics {
+                contentDescription = "Resize keyboard"
+                stateDescription = "${(keyScale * 100).roundToInt()}%"
+                progressBarRangeInfo = ProgressBarRangeInfo(keyScale, .8f..maximumScale)
+                setProgress { value ->
+                    if (value.isFinite()) {
+                        onHeightChange(value.coerceIn(.8f, maximumScale))
+                        true
+                    } else false
+                }
+            }, contentAlignment = Alignment.Center) {
+            Box(Modifier.width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Blue))
+        }
         Row(Modifier.fillMaxWidth().height(34.dp * keyScale), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val shortcuts = if (calculator) listOf("a²", "π", "!", "←", "→") else listOf("aᵇ", "√", "π", "←", "→")
             shortcuts.forEach { label -> KeyTile(label, Modifier.weight(1f)) { onKey(label) } }
@@ -1194,7 +1219,7 @@ private fun HelpSheet(onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White) {
         Column(Modifier.fillMaxWidth().heightIn(max = 610.dp).verticalScroll(rememberScrollState()).padding(horizontal = 23.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Text("Calculator guide", fontSize = 23.sp)
-            Text("Edit mathematics directly: tap a numerator, denominator, or exponent to place the cursor there. Division creates a fraction; use the arrow keys to move between slots or out of a fraction. Hold and drag to select. Typing sin, cos, sqrt, or other function names opens an argument pair automatically. The keypad adapts to calculator, 2D, and 3D modes. Decimal results appear by default; choose Decimal or Exact in Settings. Tap a result to switch formats; long-press to copy it. Use the slider above the keypad to adjust its height.", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
+            Text("Edit mathematics directly: tap a numerator, denominator, or exponent to place the cursor there. Division creates a fraction; use the arrow keys to move between slots or out of a fraction. Hold and drag to select. Typing sin, cos, sqrt, or other function names opens an argument pair automatically. The keypad adapts to calculator, 2D, and 3D modes. Decimal results appear by default; choose Decimal or Exact in Settings. Tap a result to switch formats; long-press to copy it. Drag the small blue handle above the keypad up or down to adjust its height.", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
             Text("Symbolic mathematics is powered by Giac/Xcas and runs on your device. Use exact fractions and assumptions when you need symbolic results.", fontSize = 12.sp, color = Muted, lineHeight = 18.sp)
             listOf(
                 "2D graphs" to "y=sin(x)\nx^2+y^2=9\ny<x^2\na=2\ny=a*x^2",
