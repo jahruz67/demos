@@ -16,6 +16,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -51,6 +54,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
@@ -113,6 +118,7 @@ fun CalculatorScreen(
     val density = LocalDensity.current
     var measuredKeypadHeight by remember(configuration.screenWidthDp, configuration.screenHeightDp) { mutableStateOf(0.dp) }
     var reservedKeypadHeight by remember(configuration.screenWidthDp, configuration.screenHeightDp) { mutableStateOf(0.dp) }
+    var resizedGraphHeightDp by rememberSaveable { mutableStateOf<Float?>(null) }
     var tableExportId by remember { mutableStateOf<Long?>(null) }
     var showGraphExport by remember { mutableStateOf(false) }
     val graphState = rememberSaveableStateHolder()
@@ -265,7 +271,7 @@ fun CalculatorScreen(
     }
     fun key(label: String) {
         when (label) {
-            "ABC", "123", "funcs" -> keyboardTab = label
+            "ABC", "123" -> keyboardTab = label
             "←" -> moveCursor(-1)
             "→" -> moveCursor(1)
             "space" -> edit(" ")
@@ -353,9 +359,22 @@ fun CalculatorScreen(
             val availableWidth = maxWidth
             val availableHeight = maxHeight
             val fullPanelHeight = availableHeight + (if (keyboardVisible) measuredKeypadHeight else 0.dp)
-            val portraitGraphHeight = ((fullPanelHeight - reservedKeypadHeight) * .5f)
-                .coerceAtLeast(100.dp).coerceAtMost((availableHeight - 104.dp).coerceAtLeast(100.dp))
+            // Keep room for the toolbar and an expression, even with the keypad open.
+            val maximumGraphHeight = (availableHeight - 104.dp).coerceAtLeast(0.dp)
+            val minimumGraphHeight = 100.dp.coerceAtMost(maximumGraphHeight)
+            val portraitGraphHeight = (resizedGraphHeightDp?.dp
+                ?: ((fullPanelHeight - reservedKeypadHeight) * .5f))
+                .coerceIn(minimumGraphHeight, maximumGraphHeight)
             val landscape = availableWidth >= 600.dp && (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE || availableWidth >= 840.dp)
+            val splitDragState = rememberDraggableState { delta ->
+                // Start from the visible height so resizing remains responsive at either limit.
+                // Store the requested height separately so opening the keypad only clamps it
+                // temporarily; closing the keypad restores the user's split.
+                val currentHeight = (resizedGraphHeightDp?.dp ?: portraitGraphHeight)
+                    .coerceIn(minimumGraphHeight, maximumGraphHeight)
+                resizedGraphHeightDp = (currentHeight + with(density) { delta.toDp() })
+                    .coerceIn(minimumGraphHeight, maximumGraphHeight).value
+            }
             val graphPanel: @Composable (Modifier) -> Unit = { modifier ->
                 Box(modifier) {
                     graphState.SaveableStateProvider("graph") { graph(state.is3D, Modifier.fillMaxSize()) }
@@ -387,6 +406,10 @@ fun CalculatorScreen(
                             "inference" -> { onAction(CalculatorAction.AddItem(encodeInferenceData(InferenceData()))); setKeyboardVisible(false) }
                         }
                     },
+                    modifier = if (state.layout == CalculatorLayout.Split && !landscape) {
+                        Modifier.draggable(splitDragState, Orientation.Vertical)
+                            .semantics { contentDescription = "Resize graph and expressions" }
+                    } else Modifier,
                 )
                 if (editingList) Row(Modifier.fillMaxWidth().height(38.dp).background(Color(0xFFF4F7FB)).padding(start = 12.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Edit expressions", fontSize = 13.sp, color = Muted, modifier = Modifier.weight(1f))
@@ -577,8 +600,8 @@ private fun CalculatorHeader(state: CalculatorUiState, onOpen: () -> Unit, onSav
 
 @Composable
 private fun ExpressionToolbar(canUndo: Boolean, canRedo: Boolean, keyboardVisible: Boolean, onAdd: () -> Unit, onUndo: () -> Unit, onRedo: () -> Unit, onCollapse: () -> Unit, fullscreen: Boolean, onFullscreen: () -> Unit,
-    addMenuExpanded: Boolean, onAddMenuDismiss: () -> Unit, onInsert: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().height(52.dp).background(Brush.verticalGradient(listOf(Color(0xFFFCFCFC), Color(0xFFECECEC))))
+    addMenuExpanded: Boolean, onAddMenuDismiss: () -> Unit, onInsert: (String) -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().height(52.dp).background(Brush.verticalGradient(listOf(Color(0xFFFCFCFC), Color(0xFFECECEC))))
         .border(width = .5.dp, color = Border).padding(horizontal = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         Box {
             ToolIcon(IconKind.Plus, "Add expression", onClick = onAdd)
@@ -765,25 +788,26 @@ private fun subscript(number: Int) = number.toString().map { "₀₁₂₃₄₅
 
 @Composable
 private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolean, onKey: (String) -> Unit, onTemplate: (String, Int) -> Unit) {
-    if (tab == "funcs") { FunctionKeypad(layout, is3D, onKey, onTemplate); return }
     val calculator = layout == CalculatorLayout.Calculator
     val first = if (calculator) "aᵇ" else "x"
     val second = if (calculator) "√" else "y"
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    Column(Modifier.fillMaxWidth().background(Color(0xFFF0F0F0)).border(.5.dp, Border).padding(5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth().height(38.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    var keypadTop by remember { mutableIntStateOf(0) }
+    Column(Modifier.fillMaxWidth().onGloballyPositioned { keypadTop = it.positionInWindow().y.roundToInt() }
+        .background(Color(0xFFF0F0F0)).border(.5.dp, Border).padding(5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().height(34.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val shortcuts = if (calculator) listOf("a²", "π", "!", "←", "→") else listOf("aᵇ", "√", "π", "←", "→")
             shortcuts.forEach { label -> KeyTile(label, Modifier.weight(1f)) { onKey(label) } }
         }
         if (tab == "ABC") {
             listOf("qwertyuiop", "asdfghjkl", "zxcvbnm").forEach { letters ->
-                Row(Modifier.fillMaxWidth().height(if (landscape) 40.dp else 48.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                Row(Modifier.fillMaxWidth().height(if (landscape) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     if (letters.length < 10) Spacer(Modifier.weight((10 - letters.length) / 2f))
                     letters.forEach { letter -> KeyTile(letter.toString(), Modifier.weight(1f), alphabet = true) { onKey(letter.toString()) } }
                     if (letters.length < 10) Spacer(Modifier.weight((10 - letters.length) / 2f))
                 }
             }
-            Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth().height(44.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 KeyTile("123", Modifier.weight(1.5f), gray = true) { onKey("123") }
                 KeyTile("space", Modifier.weight(4f)) { onKey("space") }
                 KeyTile("⌫", Modifier.weight(1.5f), gray = true) { onKey("⌫") }
@@ -793,10 +817,13 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
             val digits = listOf(listOf("7", "8", "9", "÷"), listOf("4", "5", "6", "×"), listOf("1", "2", "3", "−"), listOf("0", ".", "=", "+"))
             val extras = listOf(listOf(first, second, if (!calculator && is3D) "z" else "("), listOf("ABC", "funcs", if (!calculator && is3D) "()" else ")"), listOf("space", ",", "⌫"), listOf("a²", "√", "↵"))
             repeat(4) { index ->
-                Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth().height(44.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     digits[index].forEach { label -> KeyTile(label, Modifier.weight(1f), gray = label.first().isDigit()) { onKey(label) } }
                     Spacer(Modifier.width(4.dp))
-                    extras[index].forEach { label -> KeyTile(label, Modifier.weight(1f), gray = label in listOf("ABC", "funcs", "⌫"), blue = label == "↵") { onKey(label) } }
+                    extras[index].forEach { label ->
+                        if (label == "funcs") FunctionMenuKey(Modifier.weight(1f), onTemplate, keypadTop)
+                        else KeyTile(label, Modifier.weight(1f), gray = label in listOf("ABC", "⌫"), blue = label == "↵") { onKey(label) }
+                    }
                 }
             }
         } else {
@@ -808,9 +835,12 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
                 listOf("ABC", "funcs", "space", "⌫", "↵"),
             )
             rows.forEach { row ->
-                Row(Modifier.fillMaxWidth().height(52.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    row.forEach { label -> KeyTile(label, Modifier.weight(if (label == "space") 1.5f else 1f),
-                        gray = label.first().isDigit() || label in listOf("ABC", "funcs", "⌫"), blue = label == "↵") { onKey(label) } }
+                Row(Modifier.fillMaxWidth().height(46.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    row.forEach { label ->
+                        if (label == "funcs") FunctionMenuKey(Modifier.weight(1f), onTemplate, keypadTop)
+                        else KeyTile(label, Modifier.weight(if (label == "space") 1.5f else 1f),
+                            gray = label.first().isDigit() || label in listOf("ABC", "⌫"), blue = label == "↵") { onKey(label) }
+                    }
                 }
             }
         }
@@ -818,7 +848,7 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
 }
 
 @Composable
-private fun KeyTile(label: String, modifier: Modifier = Modifier, gray: Boolean = false, blue: Boolean = false, alphabet: Boolean = false, onClick: () -> Unit) {
+internal fun KeyTile(label: String, modifier: Modifier = Modifier, gray: Boolean = false, blue: Boolean = false, alphabet: Boolean = false, onClick: () -> Unit) {
     val top = when { blue -> Color(0xFF337BE5); gray -> Color(0xFFD1D1D1); else -> Color.White }
     val bottom = when { blue -> Blue; gray -> Color(0xFFC7C7C7); else -> Color(0xFFFAFAFA) }
     Box(modifier.fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(Brush.verticalGradient(listOf(top, bottom)))
@@ -833,51 +863,6 @@ private fun KeyTile(label: String, modifier: Modifier = Modifier, gray: Boolean 
                 fontSize = when { alphabet -> 20.sp; label.length == 1 && label[0].isDigit() -> 30.sp; label in listOf("ABC", "123", "funcs", "space") -> 15.sp; label.length > 2 -> 18.sp; else -> 24.sp },
                 fontFamily = if (alphabet || label in listOf("ABC", "123", "funcs", "space", "←", "→")) FontFamily.SansSerif else MathFont,
                 fontStyle = if (!alphabet && (label in listOf("x", "y", "a²", "aᵇ") || (label.length == 1 && label[0].isLetter()))) FontStyle.Italic else FontStyle.Normal)
-        }
-    }
-}
-
-private data class FunctionKey(val title: String, val source: String, val retreat: Int = 1)
-
-@Composable
-private fun FunctionKeypad(layout: CalculatorLayout, is3D: Boolean, onKey: (String) -> Unit, onTemplate: (String, Int) -> Unit) {
-    var category by remember { mutableStateOf("Math") }
-    val categories = listOf("Math", "LaTeX", "Calculus", "CAS", "Trig", "Matrix", "Stats", "More")
-    val functions = when (category) {
-        "Math" -> listOf(FunctionKey("a²", "^2", 0), FunctionKey("aᵇ", "^{}"), FunctionKey("√", "sqrt()"), FunctionKey("π", "pi", 0),
-            FunctionKey("|x|", "abs()"), FunctionKey("ln", "ln()"), FunctionKey("log", "log10()"), FunctionKey(",", ",", 0))
-        "LaTeX" -> listOf(FunctionKey("a/b", "\\frac{}{}", 3), FunctionKey("√", "\\sqrt{}"),
-            FunctionKey("ⁿ√", "\\sqrt[3]{}"), FunctionKey("aᵇ", "^{}"), FunctionKey("aₙ", "_{}"),
-            FunctionKey("sin", "\\sin()"), FunctionKey("θ", "\\theta", 0), FunctionKey("\\", "\\", 0))
-        "Calculus" -> listOf(FunctionKey("∫ f dx", "integrate(,x)", 3), FunctionKey("∫ₐᵇ f dx", "integrate(,x,0,1)", 7), FunctionKey("d/dx", "diff(,x)", 3), FunctionKey("lim", "limit(,x,0)", 5),
-            FunctionKey("Σ", "sum(,n,1,10)", 8), FunctionKey("Π", "product(,n,1,10)", 8), FunctionKey("series", "series(,x,0,6)", 7), FunctionKey("∂²/∂x²", "diff(,x,2)", 5))
-        "CAS" -> listOf(FunctionKey("solve", "solve(,x)", 3), FunctionKey("factor", "factor()"), FunctionKey("expand", "expand()"), FunctionKey("simplify", "simplify()"),
-            FunctionKey("fsolve", "fsolve(,x)", 3), FunctionKey("desolve", "desolve(,y)", 3), FunctionKey("apart", "partfrac()"), FunctionKey("assume", "assume()"))
-        "Trig" -> listOf("sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh").map { FunctionKey(it, "$it()") }
-        "Matrix" -> listOf(FunctionKey("[ ]", "[]"), FunctionKey("matrix", "[[,],[,]]", 7), FunctionKey("det", "det()"), FunctionKey("inverse", "inv()"),
-            FunctionKey("transpose", "tran()"), FunctionKey("eigenvals", "eigenvals()"), FunctionKey("rref", "rref()"), FunctionKey("dot", "dot(,)", 2))
-        "Stats" -> listOf(FunctionKey("linear fit", "linear_regression(x_1,y_1)", 0), FunctionKey("poly fit", "polynomial_regression(x_1,y_1,2)", 0),
-            FunctionKey("exp fit", "exponential_regression(x_1,y_1)", 0), FunctionKey("log fit", "logarithmic_regression(x_1,y_1)", 0),
-            FunctionKey("power fit", "power_regression(x_1,y_1)", 0), FunctionKey("mean", "mean()"), FunctionKey("median", "median()"), FunctionKey("stddev", "stddev()"))
-        else -> listOf(FunctionKey("ln", "ln()"), FunctionKey("log", "log10()"), FunctionKey("eˣ", "exp()"), FunctionKey("|x|", "abs()"),
-            FunctionKey("√", "sqrt()"), FunctionKey("n!", "!", 0), FunctionKey("∞", "infinity", 0), FunctionKey("i", "i", 0))
-    }
-    Column(Modifier.fillMaxWidth().height(244.dp).background(Color(0xFFF0F0F0)).border(.5.dp, Border).padding(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("123", color = Blue, fontSize = 15.sp, modifier = Modifier.size(48.dp).clickable { onKey("123") }.wrapContentSize())
-            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                categories.forEach { title -> Text(title, color = if (title == category) Color.White else Muted, fontSize = 13.sp,
-                    modifier = Modifier.clip(RoundedCornerShape(3.dp)).background(if (title == category) Blue else Color.Transparent).clickable { category = title }.padding(horizontal = 12.dp, vertical = 12.dp)) }
-            }
-        }
-        functions.chunked(4).forEach { row ->
-            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                row.forEach { item -> KeyTile(item.title, Modifier.weight(1f)) { onTemplate(item.source, item.retreat) } }
-            }
-        }
-        Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            val contextual = if (layout == CalculatorLayout.Calculator) listOf("aᵇ", "√") else if (is3D) listOf("x", "y", "z") else listOf("x", "y")
-            (contextual + listOf("←", "→", "space", "⌫", "↵")).forEach { label -> KeyTile(label, Modifier.weight(1f), gray = true, blue = label == "↵") { onKey(label) } }
         }
     }
 }
