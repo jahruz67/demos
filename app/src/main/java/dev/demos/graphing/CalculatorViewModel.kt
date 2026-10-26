@@ -64,6 +64,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private val undo = ArrayDeque<GraphDocument>()
     private val redo = ArrayDeque<GraphDocument>()
     private var lastEditedId = -1L
+    private var lastEditTarget: String? = null
     private var lastEditTime = 0L
     private var generation = 0L
     private var integrationConstant = 0.0
@@ -95,16 +96,43 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
 
     fun onAction(action: CalculatorAction) {
         when (action) {
+            is CalculatorAction.EditTableCell -> editTable(action.id, "cell:${action.row}:${action.column}") { table ->
+                if (action.row !in 0..table.size || action.column !in 0 until table.columnCount) table
+                else table.withCell(action.row, action.column, action.text)
+            }
+            is CalculatorAction.EditTableHeader -> editTable(action.id, "header:${action.column}") { table ->
+                if (action.column !in 0 until table.columnCount) table else table.withHeader(action.column, action.text)
+            }
+            is CalculatorAction.DeleteTableRow -> editTable(action.id) { table ->
+                if (action.row !in 0 until table.size) table else table.withoutRow(action.row)
+            }
+            is CalculatorAction.SetTableOptions -> editTable(action.id) { table ->
+                table.copy(options = action.options.copy(
+                    xHeader = table.options.xHeader, yHeader = table.options.yHeader,
+                    extraColumns = action.options.extraColumns.mapIndexed { index, column ->
+                        column.copy(values = table.options.extraColumns.getOrNull(index)?.values ?: column.values)
+                    },
+                ))
+            }
+            is CalculatorAction.SortTable -> editTable(action.id) { table ->
+                val snapshot = _state.value
+                val number = snapshot.rows.takeWhile { it.id != action.id }.count { parseTableData(it.text) != null } + 1
+                val x = TableEvaluation.columns(table, number, snapshot.sliders.associate { it.name to it.value }, !snapshot.degreeMode)[0]
+                val order = (0 until table.size).sortedWith(compareBy { x[it] ?: Double.POSITIVE_INFINITY })
+                table.copy(x = order.map { table.x.getOrElse(it) { "" } }, y = order.map { table.y.getOrElse(it) { "" } },
+                    options = table.options.copy(extraColumns = table.options.extraColumns.map { column -> column.copy(values = order.map { column.values.getOrElse(it) { "" } }) }))
+            }
             is CalculatorAction.EditRow -> {
                 val row = _state.value.rows.find { it.id == action.id } ?: return
                 if (row.text == action.text) return
                 rememberUndo(action.id)
                 _state.value = _state.value.copy(rows = _state.value.rows.map {
                     if (it.id == action.id) it.copy(text = action.text, result = "", approximate = "", error = null) else it
-                }, activeId = action.id, dirty = true, statusMessage = null)
+                }, activeId = action.id, dirty = true, statusMessage = null,
+                    tableFits = if (parseTableData(row.text) != null) _state.value.tableFits - action.id else _state.value.tableFits)
                 changed()
             }
-            is CalculatorAction.SelectRow -> _state.value = _state.value.copy(activeId = action.id)
+            is CalculatorAction.SelectRow -> if (_state.value.rows.any { it.id == action.id }) _state.value = _state.value.copy(activeId = action.id)
             CalculatorAction.AddRow -> insertItem("", reuseEmpty = false)
             is CalculatorAction.AddItem -> insertItem(action.source)
             CalculatorAction.ImportImage -> viewModelScope.launch { effectsChannel.send(CalculatorEffect.ImportImage) }
@@ -130,11 +158,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 if (restart) { toggleAnimation(action.name); toggleAnimation(action.name) }
             }
             is CalculatorAction.DeleteRow -> {
+                if (_state.value.rows.none { it.id == action.id }) return
                 rememberUndo()
                 val oldRows = _state.value.rows
                 val position = oldRows.indexOfFirst { it.id == action.id }
                 val rows = oldRows.filterNot { it.id == action.id || it.folderId == action.id }.ifEmpty { listOf(newRow(nextId++)) }
-                _state.value = _state.value.copy(rows = rows, activeId = rows[position.coerceIn(0, rows.lastIndex)].id, dirty = true)
+                val active = _state.value.activeId.takeIf { id -> rows.any { it.id == id } } ?: rows[position.coerceIn(0, rows.lastIndex)].id
+                _state.value = _state.value.copy(rows = rows, activeId = active, dirty = true)
                 changed()
             }
             is CalculatorAction.MoveRow -> {
@@ -168,11 +198,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             }
             CalculatorAction.Undo -> if (undo.isNotEmpty()) {
                 redo.addLast(document())
+                stopAnimations()
                 applyDocument(undo.removeLast(), dirty = true)
                 changed()
             }
             CalculatorAction.Redo -> if (redo.isNotEmpty()) {
                 undo.addLast(document())
+                stopAnimations()
                 applyDocument(redo.removeLast(), dirty = true)
                 changed()
             }
@@ -284,6 +316,18 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
 
     fun showMessage(message: String) { _state.value = _state.value.copy(statusMessage = message) }
 
+    private fun editTable(id: Long, target: String? = null, transform: (TableData) -> TableData) {
+        val row = _state.value.rows.firstOrNull { it.id == id } ?: return
+        val table = parseTableData(row.text) ?: return
+        val next = transform(table)
+        if (next == table) return
+        rememberUndo(if (target == null) -1 else id, target)
+        _state.value = _state.value.copy(rows = _state.value.rows.map {
+            if (it.id == id) it.copy(text = encodeTableData(next), result = "", error = null) else it
+        }, activeId = id, dirty = true, statusMessage = null, tableFits = _state.value.tableFits - id)
+        changed()
+    }
+
     private fun insertItem(source: String, reuseEmpty: Boolean = true) {
         rememberUndo()
         val snapshot = _state.value
@@ -364,9 +408,10 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         requested.clear()
         val currentGeneration = ++generation
         val snapshot = _state.value
+        val parameters = snapshot.sliders.associate { it.name to it.value }
+        val fitKey = TableFitKey(snapshot.rows.filter { parseTableData(it.text) != null }.map { it.id to it.text }, parameters, !snapshot.degreeMode)
+        _state.value = _state.value.copy(tableFitting = if (tableFitCache?.first == fitKey) emptySet() else snapshot.rows.filter { parseTableData(it.text)?.options?.regression != null }.map { it.id }.toSet())
         evaluationJob = viewModelScope.launch {
-            val parameters = snapshot.sliders.associate { it.name to it.value }
-            val fitKey = TableFitKey(snapshot.rows.filter { parseTableData(it.text) != null }.map { it.id to it.text }, parameters, !snapshot.degreeMode)
             val fits = tableFitCache?.takeIf { it.first == fitKey }?.second ?: withContext(Dispatchers.Default) {
                 snapshot.rows.mapNotNull { row ->
                     val table = parseTableData(row.text) ?: return@mapNotNull null
@@ -377,7 +422,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             }
             if (currentGeneration != generation) return@launch
             tableFitCache = fitKey to fits
-            _state.value = _state.value.copy(tableFits = fits)
+            _state.value = _state.value.copy(tableFits = fits, tableFitting = emptySet())
             val evaluations = withContext(Dispatchers.Default) {
                 val tableDefinitions = snapshot.rows.mapNotNull { parseTableData(it.text) }.flatMapIndexed { index, table ->
                     val number = index + 1
@@ -489,12 +534,12 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         return "${parsed.target}:=${parsed.body}"
     }
 
-    private fun rememberUndo(editedId: Long = -1) {
+    private fun rememberUndo(editedId: Long = -1, target: String? = null) {
         val now = System.currentTimeMillis()
-        if (editedId < 0 || editedId != lastEditedId || now - lastEditTime > 750) {
+        if (editedId < 0 || editedId != lastEditedId || target != lastEditTarget || now - lastEditTime > 750) {
             undo.addLast(document()); while (undo.size > 100) undo.removeFirst()
         }
-        lastEditedId = editedId; lastEditTime = now; redo.clear()
+        lastEditedId = editedId; lastEditTarget = target; lastEditTime = now; redo.clear()
     }
 
     private fun save(title: String) = viewModelScope.launch {
@@ -521,6 +566,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
 
     private fun document(): GraphDocument = GraphDocument(
         id = graphId, title = _state.value.title,
+        activeId = _state.value.activeId,
         expressions = _state.value.rows.map { StoredExpression(it.id, it.text, it.color, it.hidden, it.folderId) },
         sliderSettings = _state.value.sliderSettings,
         is3D = _state.value.is3D, degreeMode = _state.value.degreeMode,
@@ -537,15 +583,18 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         completed.clear(); pending.clear(); requested.clear()
         derivedPlots.clear()
         tableFitCache = null
+        lastEditedId = -1L
+        lastEditTarget = null
+        lastEditTime = 0L
         graphId = doc.id
         integrationConstant = doc.parameters["C"] ?: 0.0
         val rows = doc.expressions.map { ExpressionRow(it.id, it.text, color = it.color, hidden = it.hidden, folderId = it.folderId) }.ifEmpty { listOf(newRow(1)) }
-        nextId = (rows.maxOfOrNull { it.id } ?: 0) + 1
-        _state.value = _state.value.copy(rows = rows, activeId = rows.first().id, title = doc.title,
+        nextId = maxOf(nextId, (rows.maxOfOrNull { it.id } ?: 0) + 1)
+        _state.value = _state.value.copy(rows = rows, activeId = doc.activeId?.takeIf { id -> rows.any { it.id == id } } ?: rows.first().id, title = doc.title,
             is3D = doc.is3D, degreeMode = doc.degreeMode, showGrid = doc.showGrid, showAxes = doc.showAxes,
             precisionDigits = doc.precisionDigits, complexMode = doc.complexMode,
             bounds = with(doc.viewBounds) { GraphBounds(get("xMin"), get("xMax"), get("yMin"), get("yMax"), get("zMin"), get("zMax"), get("tMin") ?: -10.0, get("tMax") ?: 10.0, get("uMin") ?: -5.0, get("uMax") ?: 5.0, get("vMin") ?: -5.0, get("vMax") ?: 5.0) },
-            dirty = dirty, canUndo = undo.isNotEmpty(), canRedo = redo.isNotEmpty(), statusMessage = null, sliderSettings = doc.sliderSettings, tableFits = emptyMap())
+            dirty = dirty, canUndo = undo.isNotEmpty(), canRedo = redo.isNotEmpty(), statusMessage = null, sliderSettings = doc.sliderSettings, tableFits = emptyMap(), documentRevision = _state.value.documentRevision + 1, tableFitting = emptySet())
         updateSliders()
     }
 

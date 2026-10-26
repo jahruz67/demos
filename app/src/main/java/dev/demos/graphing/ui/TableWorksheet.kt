@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.demos.graphing.math.RegressionFit
 import dev.demos.graphing.math.RegressionModel
+import dev.demos.graphing.math.TableEvaluation
 
 internal data class TableCellSelection(val id: Long, val row: Int, val column: Int)
 
@@ -39,17 +40,21 @@ private val TableBorder = Color(0xFFD3D3D3)
 @Composable
 internal fun TableWorksheet(
     row: ExpressionRow, number: Int, tableNumber: Int, selected: Boolean, table: TableData,
-    editing: TableCellSelection?, value: TextFieldValue?, fit: RegressionFit?,
-    onCell: (Int, Int) -> Unit, onInput: (TextFieldValue) -> Unit, onFocus: (Boolean) -> Unit,
-    onSelect: () -> Unit, onDelete: () -> Unit, onChange: (TableData) -> Unit,
+    editing: TableCellSelection?, value: TextFieldValue?, fit: RegressionFit?, fitting: Boolean,
+    parameters: Map<String, Double>, radians: Boolean,
+    onCell: (Int, Int) -> Unit, onInput: (TableCellSelection, TextFieldValue) -> Unit, onFocus: (TableCellSelection, Boolean) -> Unit,
+    onDeleteRow: (Int) -> Unit, onSort: () -> Unit,
+    onSelect: () -> Unit, onDelete: () -> Unit, onChange: (TableOptions) -> Unit,
     onVisibility: () -> Unit, onColor: () -> Unit, onExport: () -> Unit, onCopyEquation: (String) -> Unit,
 ) {
+    val pairs = remember(table, tableNumber, parameters, radians) { TableEvaluation.pairs(table, tableNumber, parameters, radians) }
+    val validFit = fit?.takeIf { it.x == pairs.map { point -> point.first } && it.y == pairs.map { point -> point.second } }
     var columnMenu by remember(row.id) { mutableStateOf(false) }
     var regressionMenu by remember(row.id) { mutableStateOf(false) }
     var colorColumn by remember(row.id) { mutableStateOf<Int?>(null) }
     val scroll = rememberLazyListState()
-    LaunchedEffect(editing?.row) {
-        if (editing?.id == row.id && editing.row >= 0) {
+    LaunchedEffect(selected, editing, table.size) {
+        if (selected && editing?.id == row.id && editing.row >= 0) {
             val target = editing.row.coerceIn(0, table.size)
             if (scroll.layoutInfo.visibleItemsInfo.none { it.index == target }) scroll.animateScrollToItem(target)
         }
@@ -57,70 +62,82 @@ internal fun TableWorksheet(
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).border(if (selected) 1.dp else .5.dp, if (selected) TableBlue else TableBorder)) {
         Column(Modifier.width(34.dp).fillMaxHeight().background(if (selected) TableBlue else Color(0xFFEEEEEE)), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("$number", color = if (selected) Color.White else Color.Gray, fontSize = 10.sp, modifier = Modifier.align(Alignment.Start).padding(2.dp))
-            if (table.size >= 2) Text("⁙", color = if (selected) Color.White else Color.Gray, fontSize = 25.sp,
-                modifier = Modifier.clickable { onSelect(); onChange(table.copy(options = table.options.copy(regression = table.options.regression ?: RegressionModel.Linear))) }
-                    .semantics { contentDescription = "Add regression to table $tableNumber" })
+            if (pairs.size >= 2 && table.options.regression == null) Canvas(Modifier.size(30.dp).clickable {
+                onSelect(); onChange(table.options.copy(regression = RegressionModel.Linear))
+            }.semantics { contentDescription = "Add regression to table $tableNumber" }) {
+                val color = if (selected) Color.White else Color.Gray
+                drawLine(color, Offset(size.width * .16f, size.height * .76f), Offset(size.width * .84f, size.height * .24f), 1.5.dp.toPx())
+                listOf(.24f to .62f, .5f to .54f, .76f to .28f).forEach { (x, y) -> drawCircle(color, 2.dp.toPx(), Offset(size.width * x, size.height * y)) }
+            }
             Spacer(Modifier.weight(1f))
-            Text("⊕", color = if (selected) Color.White else Color.Gray, fontSize = 24.sp, modifier = Modifier.padding(bottom = 7.dp).clickable {
+            Canvas(Modifier.padding(bottom = 4.dp).size(30.dp).clickable(enabled = pairs.isNotEmpty()) {
                 onCopyEquation("zoom-table:${row.id}")
-            }.semantics { contentDescription = "Zoom to table data" })
+            }.semantics { contentDescription = "Zoom to table data" }) {
+                val color = (if (selected) Color.White else Color.Gray).copy(alpha = if (pairs.isEmpty()) .35f else 1f)
+                val center = Offset(size.width * .4f, size.height * .4f)
+                drawCircle(color, size.width * .24f, center, style = Stroke(1.5.dp.toPx()))
+                drawLine(color, Offset(size.width * .58f, size.height * .58f), Offset(size.width * .82f, size.height * .82f), 2.dp.toPx())
+                drawLine(color, center - Offset(size.width * .12f, 0f), center + Offset(size.width * .12f, 0f), 1.dp.toPx())
+                drawLine(color, center - Offset(0f, size.height * .12f), center + Offset(0f, size.height * .12f), 1.dp.toPx())
+            }
         }
         Column(Modifier.weight(1f).padding(top = 8.dp, bottom = 8.dp)) {
             Box(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(start = 15.dp, end = 44.dp).horizontalScroll(rememberScrollState())) {
                     Row(Modifier.height(44.dp)) {
                         repeat(table.columnCount) { column ->
-                            Row(Modifier.width(if (column == 0) 64.dp else 84.dp).fillMaxHeight().borderBottom(Color(0xFF555555)), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.width(if (column == 0) 80.dp else 96.dp).fillMaxHeight().borderBottom(Color(0xFF555555)), verticalAlignment = Alignment.CenterVertically) {
                                 if (column > 0) {
                                     Box {
                                         PointStyleIcon(if (column == 1) row.color else table.options.extraColumns[column - 2].color,
                                             if (column == 1) row.hidden else table.options.extraColumns[column - 2].hidden,
                                             Modifier.size(27.dp).combinedClickable(onClick = {
-                                                if (column == 1) onVisibility() else onChange(table.copy(options = table.options.copy(extraColumns = table.options.extraColumns.mapIndexed { i, c -> if (i == column - 2) c.copy(hidden = !c.hidden) else c })))
+                                                if (column == 1) onVisibility() else onChange(table.options.copy(extraColumns = table.options.extraColumns.mapIndexed { i, c -> if (i == column - 2) c.copy(hidden = !c.hidden) else c }))
                                             }, onLongClick = { if (column == 1) onColor() else colorColumn = column }))
                                     }
                                 }
-                                WorksheetCell(table.header(column, tableNumber), editing?.id == row.id && editing.row == -1 && editing.column == column,
-                                    value, number, Modifier.weight(1f), { onCell(-1, column) }, onInput, onFocus)
+                                WorksheetCell(table.header(column, tableNumber), selected && editing?.id == row.id && editing.row == -1 && editing.column == column,
+                                    value, number, Modifier.weight(1f), { onCell(-1, column) },
+                                    { onInput(TableCellSelection(row.id, -1, column), it) }, { onFocus(TableCellSelection(row.id, -1, column), it) })
                             }
                         }
-                        Text("+", color = Color(0xFFAAAAAA), fontSize = 23.sp, modifier = Modifier.width(30.dp).clickable {
-                            onChange(table.copy(options = table.options.copy(extraColumns = table.options.extraColumns + TableColumn("y_${tableNumber + table.options.extraColumns.size + 1}"))))
+                        Text("+", color = Color(0xFFAAAAAA), fontSize = 23.sp, modifier = Modifier.width(30.dp).clickable(enabled = table.columnCount < 12) {
+                            onChange(table.options.copy(extraColumns = table.options.extraColumns + TableColumn("y_${tableNumber + table.options.extraColumns.size + 1}")))
                         }.padding(5.dp))
                     }
-                    LazyColumn(Modifier.width((64 + 84 * (table.columnCount - 1) + 30).dp).height(minOf(240, maxOf(1, table.size + 1) * 34).dp), state = scroll) {
+                    LazyColumn(Modifier.width((80 + 96 * (table.columnCount - 1) + 30).dp).height(minOf(252, maxOf(1, table.size + 1) * 36).dp), state = scroll) {
                         items(maxOf(1, table.size + 1)) { index ->
-                            Row(Modifier.height(34.dp)) {
+                            Row(Modifier.height(36.dp)) {
                                 repeat(table.columnCount) { column ->
-                                    WorksheetCell(table.column(column).getOrElse(index) { "" }, editing?.id == row.id && editing.row == index && editing.column == column,
-                                        value, number, Modifier.width(if (column == 0) 64.dp else 84.dp).fillMaxHeight().borderBottom(TableBorder)
-                                            .borderLeft(if (column == 0) Color.Transparent else if (column == 1) Color(0xFF555555) else TableBorder),
-                                        { onCell(index, column) }, onInput, onFocus)
+                                    key(row.id, index, column) {
+                                        WorksheetCell(table.column(column).getOrElse(index) { "" }, selected && editing?.id == row.id && editing.row == index && editing.column == column,
+                                            value, number, Modifier.width(if (column == 0) 80.dp else 96.dp).fillMaxHeight().borderBottom(TableBorder)
+                                                .borderLeft(if (column == 0) Color.Transparent else if (column == 1) Color(0xFF555555) else TableBorder),
+                                            { onCell(index, column) },
+                                            { onInput(TableCellSelection(row.id, index, column), it) }, { onFocus(TableCellSelection(row.id, index, column), it) })
+                                    }
                                 }
-                                if (selected && editing?.id == row.id && editing.row == index && index < table.size) {
-                                    Text("×", color = Color.LightGray, fontSize = 19.sp, modifier = Modifier.width(30.dp).clickable { onChange(table.withoutRow(index)) }
-                                        .semantics { contentDescription = "Delete table row ${index + 1}" }.padding(4.dp))
-                                }
+                                Spacer(Modifier.width(30.dp))
                             }
                         }
                     }
                 }
-                Text("×", color = Color(0xFFBBBBBB), fontSize = 28.sp, modifier = Modifier.align(Alignment.TopEnd).padding(end = 7.dp).clickable(onClick = onDelete)
-                    .semantics { contentDescription = "Delete table $tableNumber" })
+                IconButton(onClick = onDelete, modifier = Modifier.align(Alignment.TopEnd).size(32.dp).semantics { contentDescription = "Delete table $tableNumber" }) {
+                    Text("×", color = Color(0xFFAAAAAA), fontSize = 25.sp)
+                }
                 Box(Modifier.align(Alignment.BottomEnd)) {
-                    Text("⋮", color = Color.Gray, fontSize = 23.sp, modifier = Modifier.padding(end = 12.dp).clickable { columnMenu = true }.semantics { contentDescription = "Table options" })
+                    IconButton(onClick = { columnMenu = true }, modifier = Modifier.size(32.dp).semantics { contentDescription = "Table options" }) { Text("⋮", color = Color.Gray, fontSize = 23.sp) }
                     DropdownMenu(columnMenu, { columnMenu = false }, modifier = Modifier.background(Color.White)) {
                         DropdownMenuItem(text = { Text(if (table.options.regression == null) "Add regression" else "Remove regression") }, onClick = {
-                            onChange(table.copy(options = table.options.copy(regression = if (table.options.regression == null) RegressionModel.Linear else null, residuals = false))); columnMenu = false
+                            onChange(table.options.copy(regression = if (table.options.regression == null) RegressionModel.Linear else null, residuals = false)); columnMenu = false
                         })
                         DropdownMenuItem(text = { Text("Export table…") }, onClick = { onExport(); columnMenu = false })
-                        DropdownMenuItem(text = { Text("Sort by ${table.header(0, tableNumber)}") }, onClick = {
-                            val order = (0 until table.size).sortedWith(compareBy { table.x.getOrNull(it)?.toDoubleOrNull() ?: Double.POSITIVE_INFINITY })
-                            onChange(table.copy(x = order.map { table.x.getOrElse(it) { "" } }, y = order.map { table.y.getOrElse(it) { "" } },
-                                options = table.options.copy(extraColumns = table.options.extraColumns.map { c -> c.copy(values = order.map { c.values.getOrElse(it) { "" } }) }))); columnMenu = false
+                        DropdownMenuItem(text = { Text("Sort by ${table.header(0, tableNumber)}") }, enabled = pairs.isNotEmpty(), onClick = { onSort(); columnMenu = false })
+                        DropdownMenuItem(text = { Text("Delete selected row") }, enabled = selected && editing?.id == row.id && editing.row in 0 until table.size, onClick = {
+                            editing?.let { onDeleteRow(it.row) }; columnMenu = false
                         })
                         if (table.columnCount > 2) DropdownMenuItem(text = { Text("Remove last column") }, onClick = {
-                            onChange(table.copy(options = table.options.copy(extraColumns = table.options.extraColumns.dropLast(1)))); columnMenu = false
+                            onChange(table.options.copy(extraColumns = table.options.extraColumns.dropLast(1))); columnMenu = false
                         })
                     }
                 }
@@ -129,7 +146,7 @@ internal fun TableWorksheet(
                 Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 9.dp, top = 12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RegressionStyleIcon(table.options.regressionColor, table.options.regressionHidden, Modifier.size(29.dp).combinedClickable(onClick = {
-                            onChange(table.copy(options = table.options.copy(regressionHidden = !table.options.regressionHidden)))
+                            onChange(table.options.copy(regressionHidden = !table.options.regressionHidden))
                         }, onLongClick = { colorColumn = -1 }))
                         Box(Modifier.weight(1f).padding(start = 6.dp)) {
                             Row(Modifier.fillMaxWidth().height(36.dp).border(1.dp, TableBorder, RoundedCornerShape(4.dp)).clickable { regressionMenu = true }
@@ -138,8 +155,8 @@ internal fun TableWorksheet(
                             }
                             DropdownMenu(regressionMenu, { regressionMenu = false }, modifier = Modifier.width(225.dp).background(Color.White)) {
                                 RegressionModel.entries.forEach { item ->
-                                    DropdownMenuItem(text = { Text(item.label, fontSize = 13.sp) }, modifier = Modifier.height(35.dp).background(if (model == item) Color(0xFFE4ECF9) else Color.Transparent), onClick = {
-                                        onChange(table.copy(options = table.options.copy(regression = item))); regressionMenu = false
+                                    DropdownMenuItem(text = { Text(item.label, fontSize = 13.sp) }, modifier = Modifier.background(if (model == item) Color(0xFFE4ECF9) else Color.Transparent), onClick = {
+                                        onChange(table.options.copy(regression = item)); regressionMenu = false
                                     })
                                 }
                                 HorizontalDivider()
@@ -148,27 +165,33 @@ internal fun TableWorksheet(
                         }
                         var options by remember { mutableStateOf(false) }
                         Box {
-                            Text("⋮", color = Color.Gray, fontSize = 22.sp, modifier = Modifier.padding(start = 5.dp).clickable { options = true })
+                            IconButton(onClick = { options = true }, modifier = Modifier.size(30.dp).semantics { contentDescription = "Regression options" }) { Text("⋮", color = Color.Gray, fontSize = 22.sp) }
                             DropdownMenu(options, { options = false }, modifier = Modifier.background(Color.White)) {
-                                DropdownMenuItem(text = { Text("Remove regression") }, onClick = { onChange(table.copy(options = table.options.copy(regression = null, residuals = false))); options = false })
-                                DropdownMenuItem(text = { Text("Copy equation to expression") }, enabled = fit != null, onClick = { fit?.let { onCopyEquation("y=${it.expression}") }; options = false })
+                                DropdownMenuItem(text = { Text("Remove regression") }, onClick = { onChange(table.options.copy(regression = null, residuals = false)); options = false })
+                                DropdownMenuItem(text = { Text("Copy equation to expression") }, enabled = validFit != null, onClick = { validFit?.let { onCopyEquation("y=${it.expression}") }; options = false })
                                 if (model == RegressionModel.Exponential || model == RegressionModel.Power) DropdownMenuItem(text = { Text(if (table.options.logMode) "✓ Log Mode" else "Log Mode") }, onClick = {
-                                    onChange(table.copy(options = table.options.copy(logMode = !table.options.logMode))); options = false
+                                    onChange(table.options.copy(logMode = !table.options.logMode)); options = false
                                 })
                             }
                         }
                     }
                     Row(Modifier.padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("EQUATION", fontSize = 10.sp, color = Color.Gray)
-                        Text("  ▣", color = Color.Gray, fontSize = 16.sp, modifier = Modifier.clickable { fit?.let { onCopyEquation("y=${it.expression}") } }
-                            .semantics { contentDescription = "Copy fitted equation to a new expression" })
+                        IconButton(onClick = { validFit?.let { onCopyEquation("y=${it.expression}") } }, enabled = validFit != null,
+                            modifier = Modifier.size(30.dp).semantics { contentDescription = "Copy fitted equation to a new expression" }) {
+                            Text("▣", color = if (validFit == null) Color.LightGray else Color.Gray, fontSize = 16.sp)
+                        }
                     }
-                    if (fit != null) Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) { MathExpression("y=${displayEquation(fit.expression)}", 19) }
-                    else Text("Add enough valid, distinct points for this model.", color = Color.Gray, fontSize = 11.sp, modifier = Modifier.padding(vertical = 6.dp))
-                    Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 5.dp)) {
+                    if (fitting) Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                        Text("  Fitting curve…", color = Color.Gray, fontSize = 12.sp)
+                    }
+                    else if (validFit != null) Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) { MathExpression("y=${displayEquation(validFit.expression)}", 19) }
+                    else Text(regressionMessage(model, pairs), color = Color.Gray, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(vertical = 6.dp))
+                    if (validFit != null) Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 5.dp)) {
                         Column(Modifier.weight(1f)) {
                             Text("STATISTICS", color = Color.Gray, fontSize = 10.sp)
-                            fit?.let {
+                            validFit?.let {
                                 MathExpression("R^2=${statNumber(it.rSquared)}", 19)
                                 it.correlation?.let { correlation -> MathExpression("r=${statNumber(correlation)}", 18) }
                             }
@@ -179,7 +202,7 @@ internal fun TableWorksheet(
                                 MathExpression("e_$tableNumber", 18)
                                 Text(if (table.options.residuals) " hide " else " plot ", fontSize = 13.sp,
                                     modifier = Modifier.padding(start = 6.dp).background(Color(0xFFF4F4F4), RoundedCornerShape(3.dp)).border(.7.dp, TableBorder, RoundedCornerShape(3.dp))
-                                        .clickable { onChange(table.copy(options = table.options.copy(residuals = !table.options.residuals))) }.padding(3.dp))
+                                        .clickable(enabled = validFit != null) { onChange(table.options.copy(residuals = !table.options.residuals)) }.padding(3.dp))
                             }
                         }
                     }
@@ -190,8 +213,8 @@ internal fun TableWorksheet(
     colorColumn?.let { column ->
         val color = if (column == -1) table.options.regressionColor else table.options.extraColumns.getOrNull(column - 2)?.color ?: row.color
         ColorPaletteDialog(color, { colorColumn = null }) { next ->
-            if (column == -1) onChange(table.copy(options = table.options.copy(regressionColor = next)))
-            else onChange(table.copy(options = table.options.copy(extraColumns = table.options.extraColumns.mapIndexed { i, item -> if (i == column - 2) item.copy(color = next) else item })))
+            if (column == -1) onChange(table.options.copy(regressionColor = next))
+            else onChange(table.options.copy(extraColumns = table.options.extraColumns.mapIndexed { i, item -> if (i == column - 2) item.copy(color = next) else item }))
             colorColumn = null
         }
     }
@@ -224,6 +247,21 @@ internal fun RegressionStyleIcon(color: Int, hidden: Boolean = false, modifier: 
         val wave = Path().apply { moveTo(0f, size.height * .7f); cubicTo(size.width * .35f, -size.height * .45f, size.width * .4f, size.height * 1.5f, size.width, size.height * .2f) }
         drawPath(wave, if (hidden) Color(color) else Color.White, style = Stroke(2.5.dp.toPx()))
     }
+}
+
+private fun regressionMessage(model: RegressionModel, pairs: List<Pair<Double, Double>>): String {
+    val needed = when (model) {
+        RegressionModel.Quadratic, RegressionModel.Logistic -> 3
+        RegressionModel.Cubic, RegressionModel.Sinusoidal -> 4
+        RegressionModel.Quartic -> 5
+        else -> 2
+    }
+    if (pairs.size < needed) return "Enter at least $needed complete x, y pairs for this model (${pairs.size} entered)."
+    if (model in setOf(RegressionModel.Logarithmic, RegressionModel.Power) && pairs.any { it.first <= 0 }) return "This model requires positive x values."
+    if (model in setOf(RegressionModel.Exponential, RegressionModel.Power) && pairs.any { it.second <= 0 }) return "This model requires positive y values."
+    val distinct = if (model in setOf(RegressionModel.Linear, RegressionModel.Quadratic, RegressionModel.Cubic, RegressionModel.Quartic)) needed else 2
+    if (pairs.map { it.first }.distinct().size < distinct) return "Use at least $distinct distinct x values for this model."
+    return "This model could not be fitted to the data. Try another model."
 }
 
 private fun statNumber(value: Double) = java.lang.String.format(java.util.Locale.US, "%.4f", value).trimEnd('0').trimEnd('.')

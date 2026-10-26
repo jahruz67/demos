@@ -27,6 +27,7 @@ data class GraphDocument(
     val viewBounds: Map<String, Double> = emptyMap(),
     val updatedAt: Long = System.currentTimeMillis(),
     val sliderSettings: Map<String, dev.demos.graphing.ui.SliderConfiguration> = emptyMap(),
+    val activeId: Long? = null,
 )
 
 class GraphRepository(context: Context) {

@@ -72,10 +72,17 @@ data class CalculatorUiState(
     val keyboardVisible: Boolean = true,
     val sliderSettings: Map<String, SliderConfiguration> = emptyMap(),
     val tableFits: Map<Long, dev.demos.graphing.math.RegressionFit> = emptyMap(),
+    val documentRevision: Long = 0,
+    val tableFitting: Set<Long> = emptySet(),
 )
 
 sealed interface CalculatorAction {
     data class EditRow(val id: Long, val text: String) : CalculatorAction
+    data class EditTableCell(val id: Long, val row: Int, val column: Int, val text: String) : CalculatorAction
+    data class EditTableHeader(val id: Long, val column: Int, val text: String) : CalculatorAction
+    data class DeleteTableRow(val id: Long, val row: Int) : CalculatorAction
+    data class SetTableOptions(val id: Long, val options: TableOptions) : CalculatorAction
+    data class SortTable(val id: Long) : CalculatorAction
     data class SelectRow(val id: Long) : CalculatorAction
     data object AddRow : CalculatorAction
     data class AddItem(val source: String) : CalculatorAction
