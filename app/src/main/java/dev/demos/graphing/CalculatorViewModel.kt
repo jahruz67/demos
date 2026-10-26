@@ -45,15 +45,13 @@ sealed interface CalculatorEffect {
 class CalculatorViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = GraphRepository(application)
     private val engine = CasEngine(application)
-    private val preferences = application.getSharedPreferences("calculator-layout", Context.MODE_PRIVATE)
-    private val initialLayout = runCatching {
-        CalculatorLayout.valueOf(preferences.getString("layout", "Split") ?: "Split")
-    }.getOrDefault(CalculatorLayout.Split)
+    private val preferences by lazy { application.getSharedPreferences("calculator-layout", Context.MODE_PRIVATE) }
     private val _state = MutableStateFlow(CalculatorUiState(
-        rows = listOf(newRow(1)), activeId = 1, layout = initialLayout,
-        keyboardVisible = preferences.getBoolean("keyboard-visible", initialLayout != CalculatorLayout.Graph),
+        rows = listOf(newRow(1)), activeId = 1,
     ))
     val state = _state.asStateFlow()
+    private val _startupReady = MutableStateFlow(false)
+    val startupReady = _startupReady.asStateFlow()
     private val effectsChannel = Channel<CalculatorEffect>(Channel.BUFFERED)
     val effects = effectsChannel.receiveAsFlow()
     private var graphId = UUID.randomUUID().toString()
@@ -83,9 +81,18 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         // CasEngine binds lazily on the first expression that needs symbolic evaluation.
         viewModelScope.launch {
             val recoveryGeneration = generation
-            val recovered = withContext(Dispatchers.IO) { repository.restoreRecovery() }
+            // SharedPreferences can wait for disk on its first read. Keep both
+            // preference loading and recovery decoding off the first-frame path.
+            val (layout, keyboardVisible, recovered) = withContext(Dispatchers.IO) {
+                val layout = runCatching {
+                    CalculatorLayout.valueOf(preferences.getString("layout", "Split") ?: "Split")
+                }.getOrDefault(CalculatorLayout.Split)
+                Triple(layout, preferences.getBoolean("keyboard-visible", layout != CalculatorLayout.Graph), repository.restoreRecovery())
+            }
+            _state.value = _state.value.copy(layout = layout, keyboardVisible = keyboardVisible)
             if (generation == recoveryGeneration && !_state.value.dirty && recovered != null) applyDocument(recovered)
             restorePending = false
+            _startupReady.value = true
             if (_state.value.dirty) changed() else scheduleEvaluation()
         }
     }

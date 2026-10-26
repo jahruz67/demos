@@ -12,6 +12,7 @@
         android:theme="@style/Theme.Demos">
         <activity
             android:name=".MainActivity"
+            android:theme="@style/Theme.Demos.Starting"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

@@ -33,7 +33,7 @@ data class GraphDocument(
 class GraphRepository(context: Context) {
     private val root by lazy { File(context.noBackupFilesDir, "graphs").apply { mkdirs() } }
     private val recovery by lazy { File(context.noBackupFilesDir, "recovery.json") }
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+    private val json by lazy { Json { ignoreUnknownKeys = true; prettyPrint = true } }
     private val validId = Regex("[0-9a-fA-F-]{36}")
 
     @Synchronized

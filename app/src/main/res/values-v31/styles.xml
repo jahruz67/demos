@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.Demos.Starting" parent="Theme.Demos">
+        <item name="android:windowBackground">@color/startup_background</item>
+        <item name="android:windowSplashScreenBackground">@color/startup_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_startup</item>
+        <item name="android:windowSplashScreenAnimationDuration">0</item>
+        <item name="android:statusBarColor">@color/startup_background</item>
+        <item name="android:navigationBarColor">@color/startup_background</item>
+    </style>
+</resources>
