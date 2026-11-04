@@ -90,7 +90,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 }.getOrDefault(CalculatorLayout.Split)
                 DisplayPreferences(layout, preferences.getBoolean("keyboard-visible", layout != CalculatorLayout.Graph),
                     preferences.getBoolean("default-decimal", true),
-                    preferences.getFloat("keyboard-height-scale", 1f).takeIf { it.isFinite() }?.coerceIn(.8f, 1.4f) ?: 1f
+                    preferences.getFloat("keyboard-height-scale", 1f).takeIf { it.isFinite() }?.coerceIn(.6f, 1.4f) ?: 1f
                 ) to repository.restoreRecovery()
             }
             _state.value = _state.value.copy(layout = display.layout, keyboardVisible = display.keyboardVisible,
@@ -245,7 +245,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             }
             is CalculatorAction.SetKeyboardHeightScale -> {
                 if (!action.scale.isFinite()) return
-                val scale = action.scale.coerceIn(.8f, 1.4f)
+                val scale = action.scale.coerceIn(.6f, 1.4f)
                 _state.value = _state.value.copy(keyboardHeightScale = scale)
                 preferences.edit().putFloat("keyboard-height-scale", scale).apply()
             }

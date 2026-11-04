@@ -827,7 +827,7 @@ private fun KeyboardHeightControl(scale: Float, onChange: (Float) -> Unit) {
     Row(Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 8.dp),
         horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
         Text("Keyboard height", fontSize = 11.sp, color = Muted)
-        Slider(value = scale.coerceIn(.8f, 1.4f), onValueChange = onChange, valueRange = .8f..1.4f, steps = 11,
+        Slider(value = scale.coerceIn(.6f, 1.4f), onValueChange = onChange, valueRange = .6f..1.4f, steps = 15,
             modifier = Modifier.padding(horizontal = 8.dp).width(120.dp).height(32.dp)
                 .semantics { contentDescription = "Keyboard height" },
             colors = SliderDefaults.colors(thumbColor = Blue, activeTrackColor = Blue))
@@ -845,12 +845,12 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
     // Reserve space for the worksheet on short screens, including landscape phones.
     val keyRowsHeight = if (tab == "ABC") (if (landscape) 186f else 210f) else if (landscape) 210f else 264f
     val spacingHeight = if (tab == "ABC" || landscape) 30f else 34f
-    val maximumScale = ((LocalConfiguration.current.screenHeightDp - 160f - 20f - spacingHeight) / keyRowsHeight).coerceIn(.8f, 1.4f)
-    val keyScale = heightScale.coerceIn(.8f, 1.4f).coerceAtMost(maximumScale)
+    val maximumScale = ((LocalConfiguration.current.screenHeightDp - 160f - 20f - spacingHeight) / keyRowsHeight).coerceIn(.6f, 1.4f)
+    val keyScale = heightScale.coerceIn(.6f, 1.4f).coerceAtMost(maximumScale)
     val density = LocalDensity.current
     var dragScale by remember { mutableFloatStateOf(keyScale) }
     val resizeState = rememberDraggableState { delta ->
-        dragScale = (dragScale - with(density) { delta.toDp().value } / keyRowsHeight).coerceIn(.8f, maximumScale)
+        dragScale = (dragScale - with(density) { delta.toDp().value } / keyRowsHeight).coerceIn(.6f, maximumScale)
         onHeightChange(dragScale)
     }
     var keypadTop by remember { mutableIntStateOf(0) }
@@ -861,10 +861,10 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
             .semantics {
                 contentDescription = "Resize keyboard"
                 stateDescription = "${(keyScale * 100).roundToInt()}%"
-                progressBarRangeInfo = ProgressBarRangeInfo(keyScale, .8f..maximumScale)
+                progressBarRangeInfo = ProgressBarRangeInfo(keyScale, .6f..maximumScale)
                 setProgress { value ->
                     if (value.isFinite()) {
-                        onHeightChange(value.coerceIn(.8f, maximumScale))
+                        onHeightChange(value.coerceIn(.6f, maximumScale))
                         true
                     } else false
                 }
@@ -927,16 +927,18 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
 internal fun KeyTile(label: String, modifier: Modifier = Modifier, gray: Boolean = false, blue: Boolean = false, alphabet: Boolean = false, onClick: () -> Unit) {
     val top = when { blue -> Color(0xFF337BE5); gray -> Color(0xFFD1D1D1); else -> Color.White }
     val bottom = when { blue -> Blue; gray -> Color(0xFFC7C7C7); else -> Color(0xFFFAFAFA) }
-    Box(modifier.fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(Brush.verticalGradient(listOf(top, bottom)))
+    BoxWithConstraints(modifier.fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(Brush.verticalGradient(listOf(top, bottom)))
         .border(.7.dp, if (blue) Color(0xFF377FE9) else Color(0xFFD5D5D5), RoundedCornerShape(2.dp))
         .clickable(onClick = onClick).semantics { contentDescription = when (label) { "⌫" -> "Backspace"; "↵" -> "New expression"; "edit" -> "Edit expression"; "speak" -> "Read expression aloud"; "space" -> "Space"; "funcs" -> "Functions"; else -> label } }, contentAlignment = Alignment.Center) {
+        // Keep labels inside compact key rows when the keyboard is shrunk.
+        val labelScale = (maxHeight / 36.dp).coerceAtMost(1f)
         when (label) {
             "⌫" -> CalcIcon(IconKind.Backspace, Color.Black, Modifier.size(20.dp))
             "↵" -> CalcIcon(IconKind.Return, Color.White, Modifier.size(27.dp))
-            "edit" -> Text("✎", color = Color(0xFF828282), fontSize = 18.sp)
+            "edit" -> Text("✎", color = Color(0xFF828282), fontSize = 18.sp * labelScale)
             "speak" -> CalcIcon(IconKind.Speaker, Color(0xFF858585), Modifier.size(18.dp))
             else -> Text(label, color = if (blue) Color.White else Color.Black,
-                fontSize = when { alphabet -> 20.sp; label.length == 1 && label[0].isDigit() -> 30.sp; label in listOf("ABC", "123", "funcs", "space") -> 15.sp; label.length > 2 -> 18.sp; else -> 24.sp },
+                fontSize = (when { alphabet -> 20.sp; label.length == 1 && label[0].isDigit() -> 30.sp; label in listOf("ABC", "123", "funcs", "space") -> 15.sp; label.length > 2 -> 18.sp; else -> 24.sp }) * labelScale,
                 fontFamily = if (alphabet || label in listOf("ABC", "123", "funcs", "space", "←", "→")) FontFamily.SansSerif else MathFont,
                 fontStyle = if (!alphabet && (label in listOf("x", "y", "a²", "aᵇ") || (label.length == 1 && label[0].isLetter()))) FontStyle.Italic else FontStyle.Normal)
         }

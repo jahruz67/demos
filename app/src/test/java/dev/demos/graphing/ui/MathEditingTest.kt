@@ -18,6 +18,16 @@ class MathEditingTest {
         return next
     }
 
+    private fun moveToEnd(value: TextFieldValue): TextFieldValue {
+        var next = value
+        while (next.selection.end < next.text.length) {
+            val moved = MathInputRules.move(next, 1)
+            if (moved.selection == next.selection) break
+            next = moved
+        }
+        return next
+    }
+
     @Test fun slashCreatesEditableSlotsAndArrowsExitThem() {
         var value = type(TextFieldValue(), "900/8")
         assertEquals("\\frac{900}{8}", value.text)
@@ -51,6 +61,30 @@ class MathEditingTest {
         assertTrue(editableMath(value.text).slots().any { it.start == 3 && it.end == 4 })
         value = type(MathInputRules.move(value, 1), "+1")
         assertEquals("2^{3}+1", value.text)
+    }
+
+    @Test fun nestedExpressionFromRecordingCanBeEnteredWithoutLosingItsStructure() {
+        var value = moveToEnd(type(TextFieldValue(), "3x^2/3"))
+        value = type(value, "/3234")
+        value = moveToEnd(value)
+        value = type(value, "884(54)(2x-2/2")
+        value = moveToEnd(value)
+        value = type(value, "^234")
+        value = moveToEnd(value)
+        value = type(value, "ln(4)")
+        value = moveToEnd(value)
+        value = type(value, "/2")
+        value = moveToEnd(value)
+        value = type(value, "(3x-1)")
+        value = moveToEnd(value)
+        value = type(value, "/1")
+
+        assertEquals(
+            "\\frac{\\frac{\\frac{3x^{\\frac{2}{3}}}{3234}884(54)(2x-\\frac{2}{2})^{234}ln(4)}{2}(3x-1)}{1}",
+            value.text,
+        )
+        assertTrue(mathDisplay(value.text).hasFraction())
+        assertTrue(NumericCompiler.compile(value.text).evaluate(mapOf("x" to 2.0)).isFinite())
     }
 
     @Test fun rawAndLatexDivisionBothKeepDocumentOffsets() {

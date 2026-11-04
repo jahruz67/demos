@@ -82,7 +82,7 @@ object PlotGeometry {
                         if(crossings.size==8) strokes.add(PlotStroke(relation.id,relation.color,crossings.drop(4).toFloatArray()))
                     }
                 }
-                PlotKind.Z_SURFACE,PlotKind.PARAMETRIC_SURFACE -> Unit
+                PlotKind.Z_SURFACE,PlotKind.XY_FIELD,PlotKind.PARAMETRIC_SURFACE -> Unit
             }
         }
         return Geometry2D(strokes,fills,PointOfInterestAnalyzer.analyze(program,view,cancelled=cancelled))
@@ -116,11 +116,11 @@ object PlotGeometry {
         for(r in program.relations) {
             if(cancelled()) break
             when(r.kind) {
-                PlotKind.Z_SURFACE,PlotKind.Y_FUNCTION,PlotKind.X_FUNCTION,PlotKind.PARAMETRIC_SURFACE -> {
+                PlotKind.Z_SURFACE,PlotKind.XY_FIELD,PlotKind.Y_FUNCTION,PlotKind.X_FUNCTION,PlotKind.PARAMETRIC_SURFACE -> {
                     val out=FloatBuilder();val resolution=64
                     val s=program.settings
                     val xBounds=bounds(s.xMin,s.xMax,radius);val yBounds=bounds(s.yMin,s.yMax,radius);val zBounds=bounds(s.zMin,s.zMax,radius)
-                    val uBounds=when(r.kind) {PlotKind.Y_FUNCTION -> xBounds;PlotKind.X_FUNCTION -> yBounds;PlotKind.PARAMETRIC_SURFACE -> bounds(s.uMin,s.uMax,radius);else -> xBounds}
+                    val uBounds=when(r.kind) {PlotKind.Y_FUNCTION,PlotKind.XY_FIELD -> xBounds;PlotKind.X_FUNCTION -> yBounds;PlotKind.PARAMETRIC_SURFACE -> bounds(s.uMin,s.uMax,radius);else -> xBounds}
                     val vBounds=when(r.kind) {PlotKind.Y_FUNCTION,PlotKind.X_FUNCTION -> zBounds;PlotKind.PARAMETRIC_SURFACE -> bounds(s.vMin,s.vMax,radius);else -> yBounds}
                     val span=maxOf(uBounds.second-uBounds.first,vBounds.second-vBounds.first,radius)
                     fun insideConfiguredBounds(p:Vec3)=

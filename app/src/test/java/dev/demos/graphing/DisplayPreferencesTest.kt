@@ -69,6 +69,6 @@ class DisplayPreferencesTest {
         model.onAction(CalculatorAction.SetKeyboardHeightScale(Float.POSITIVE_INFINITY))
         assertEquals(1.4f, model.state.value.keyboardHeightScale)
         model.onAction(CalculatorAction.SetKeyboardHeightScale(-1f))
-        assertEquals(.8f, restoredModel("clamped").state.value.keyboardHeightScale)
+        assertEquals(.6f, restoredModel("clamped").state.value.keyboardHeightScale)
     }
 }

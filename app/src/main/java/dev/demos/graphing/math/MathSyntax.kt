@@ -59,7 +59,7 @@ object MathSyntax {
                 c == '≥' -> out.append(">=")
                 c == '≠' -> out.append("!=")
                 c == '∞' -> out.append(" infinity ")
-                c == '√' -> out.append("sqrt ")
+                c == '√' -> out.append(" sqrt ")
                 c == '［' -> out.append('[')
                 c == '］' -> out.append(']')
                 c == '（' -> out.append('(')

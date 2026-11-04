@@ -27,7 +27,7 @@ data class Viewport(val centerX: Double = 0.0, val centerY: Double = 0.0, val wi
     val bottom get() = centerY-height/2
     val top get() = centerY+height/2
 }
-enum class PlotKind { Y_FUNCTION, X_FUNCTION, Z_SURFACE, IMPLICIT, POLAR, PARAMETRIC, PARAMETRIC_SURFACE, POINT }
+enum class PlotKind { Y_FUNCTION, X_FUNCTION, Z_SURFACE, XY_FIELD, IMPLICIT, POLAR, PARAMETRIC, PARAMETRIC_SURFACE, POINT }
 data class PlotRelation(val id:Long, val color:Int, val kind:PlotKind, val expressions:List<CompiledExpression>, val inequality:String?=null)
 data class PlotProgram(val relations:List<PlotRelation>,val context:EvaluationContext,val settings:PlotSettings=PlotSettings()) {
     companion object {
@@ -103,7 +103,14 @@ data class PlotProgram(val relations:List<PlotRelation>,val context:EvaluationCo
                         else -> {
                             val node=compiled(s)
                             if(node.variables.isEmpty() || node.variables.all {it in constants && it !in setOf("x","y","z","t")}) null
-                            else PlotRelation(expression.id,expression.color,if("y" in node.variables || "z" in node.variables) PlotKind.Z_SURFACE else PlotKind.Y_FUNCTION,listOf(node))
+                            else {
+                                val kind=when {
+                                    "x" in node.variables && "y" in node.variables -> PlotKind.XY_FIELD
+                                    "y" in node.variables || "z" in node.variables -> PlotKind.Z_SURFACE
+                                    else -> PlotKind.Y_FUNCTION
+                                }
+                                PlotRelation(expression.id,expression.color,kind,listOf(node))
+                            }
                         }
                     }
                     if(item!=null) relations.add(item)

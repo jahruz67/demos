@@ -37,6 +37,32 @@ class PlotGeometryTest {
             assertEquals(9.0,(x*x+y*y).toDouble(),0.01)
         }
     }
+    @Test fun bareExpressionInXAndYIsNotGraphedIn2D() {
+        val p=program("y√x − y² −2x +7y")
+        assertEquals(PlotKind.XY_FIELD,p.relations.single().kind)
+        val node=p.relations.single().expressions.single()
+        assertEquals(setOf("x","y"),node.variables)
+        assertEquals(-2.0,node.evaluate(mapOf("x" to 1.0, "y" to 0.0)),1e-8)
+        assertEquals(5.0,node.evaluate(mapOf("x" to 1.0, "y" to 1.0)),1e-8)
+        val geometry=PlotGeometry.sample2D(p,Viewport(centerX=2.0,centerY=4.0,width=2.0,height=10.0))
+        assertTrue(geometry.strokes.isEmpty())
+        assertTrue(geometry.fills.isEmpty())
+    }
+    @Test fun bareExpressionInXAndYProducesA3DSurface() {
+        val p=program("y√x − y² −2x +7y")
+        val relation=p.relations.single()
+        assertEquals(PlotKind.XY_FIELD,relation.kind)
+        val vertices=PlotGeometry.sample3D(p).single().vertices
+        assertTrue(vertices.isNotEmpty())
+        val zValues=HashSet<Float>()
+        for(i in vertices.indices step 6) {
+            val x=vertices[i].toDouble();val y=vertices[i+1].toDouble();val z=vertices[i+2].toDouble()
+            assertEquals(z,relation.expressions.single().evaluate(mapOf("x" to x,"y" to y)),1e-4)
+            assertTrue(x>=0.0)
+            zValues.add(vertices[i+2])
+        }
+        assertTrue(zValues.size>10)
+    }
     @Test fun implicitSphereProducesFiniteTrianglesNearRadiusThree() {
         val meshes=PlotGeometry.sample3D(program("x^2+y^2+z^2=9"))
         val vertices=meshes.single().vertices
