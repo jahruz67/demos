@@ -14,10 +14,6 @@ Demos is an Android graphing calculator built with Kotlin and Jetpack Compose. I
 
 The native CAS runs on-device in a separate Android process. Normal app builds use the bundled Giac AAR; rebuilding native libraries is not required.
 
-## Website
-
-A separate browser version lives in `web/`, with its own GitHub Pages workflow. Enable **Settings → Pages → Source: GitHub Actions**, then push the website changes to the default branch to deploy. See [website setup and compatibility](docs/WEBSITE.md). The Android app and APK release workflow are independent of the website.
-
 ## Requirements
 
 - JDK 17.
