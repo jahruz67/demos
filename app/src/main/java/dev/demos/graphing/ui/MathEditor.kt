@@ -36,8 +36,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -176,7 +174,7 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
     // session itself so taps, selection and refocusing cannot open the tablet IME.
     InterceptPlatformTextInput(interceptor = { _, _ -> awaitCancellation() }) {
         BasicTextField(value = value, onValueChange = onInput, singleLine = true,
-            textStyle = TextStyle(fontSize = 26.sp, color = Color.Transparent), cursorBrush = SolidColor(Color.Transparent),
+            textStyle = mathTextStyle(fontSize.sp).copy(color = Color.Transparent), cursorBrush = SolidColor(Color.Transparent),
             keyboardOptions = KeyboardOptions(showKeyboardOnFocus = false),
             modifier = modifier.heightIn(min = minimumHeight).focusRequester(focus).onFocusChanged { onFocus(it.isFocused) }
                 .onPreviewKeyEvent { event ->
@@ -250,7 +248,7 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
                         }
                     }) {
                       Box(Modifier.fillMaxWidth().horizontalScroll(scroll).padding(vertical = 6.dp, horizontal = 2.dp)) {
-                        if (value.text.isEmpty() && placeholder.isNotEmpty()) Text(placeholder, color = Color(0xFFAAAAAA), fontSize = 18.sp)
+                        if (value.text.isEmpty() && placeholder.isNotEmpty()) Text(placeholder, color = DemosColors.Subtle, style = interfaceTextStyle(18.sp))
                         MathEditorNode(tree, value, fontSize, owner, selected && caretVisible, hits)
                       }
                     }
@@ -305,7 +303,7 @@ private fun MathSelectionHandle(point: MathHit, origin: Offset, label: String,
             detectDragGestures(onDragStart = { currentStart() }, onDragEnd = { currentEnd() },
                 onDragCancel = { currentEnd() }, onDrag = { change, delta -> change.consume(); currentDrag(delta) })
         }) {
-            val blue = Color(0xFF2D70DA)
+            val blue = DemosColors.Blue
             drawLine(blue, Offset(size.width / 2, 0f), Offset(size.width / 2, 8.dp.toPx()), 2.dp.toPx())
             drawCircle(blue, 7.dp.toPx(), Offset(size.width / 2, 8.dp.toPx()))
         }
@@ -315,6 +313,7 @@ private fun MathSelectionHandle(point: MathHit, origin: Offset, label: String,
 @Composable
 private fun MathEditorNode(node: EditableMath, value: TextFieldValue, size: Int, owner: MathSlot?, caret: Boolean,
     hits: MutableMap<MathSlot, List<MathHit>>) {
+    val fontHeight = with(LocalDensity.current) { size.sp.toDp() }
     fun childSize() = (size * .8).toInt().coerceAtLeast(13)
     @Composable fun child(part: EditableMath, font: Int = size) { MathEditorNode(part, value, font, owner, caret, hits) }
     @Composable fun entry() { MathEditorLeaf(MathSlot(node.start, node.start), value, size, owner, caret, hits) }
@@ -326,22 +325,22 @@ private fun MathEditorNode(node: EditableMath, value: TextFieldValue, size: Int,
             entry()
             Column(Modifier.width(IntrinsicSize.Max).padding(horizontal = 3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 child(node.top, childSize())
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF202020)))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(DemosColors.Ink))
                 child(node.bottom, childSize())
             }
             exit()
         }
         is EditableMath.Script -> Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.padding(bottom = if (node.raised) (size * .65).dp else 0.dp,
-                top = if (!node.raised) (size * .5).dp else 0.dp)) { child(node.body, childSize()) }
+            Box(Modifier.padding(bottom = if (node.raised) fontHeight * .65f else 0.dp,
+                top = if (!node.raised) fontHeight * .5f else 0.dp)) { child(node.body, childSize()) }
             exit()
         }
         is EditableMath.Root -> Row(verticalAlignment = Alignment.CenterVertically) {
             entry()
-            node.index?.let { index -> Box(Modifier.padding(bottom = (size * .7).dp)) { child(index, childSize()) } }
-            Text("√", fontFamily = FontFamily.Serif, fontSize = (size * 1.3).sp)
+            node.index?.let { index -> Box(Modifier.padding(bottom = fontHeight * .7f)) { child(index, childSize()) } }
+            Text("√", style = mathTextStyle((size * 1.3).sp))
             Column(Modifier.width(IntrinsicSize.Max)) {
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF202020)))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(DemosColors.Ink))
                 child(node.body)
             }
             exit()
@@ -374,18 +373,18 @@ private fun MathEditorLeaf(slot: MathSlot, value: TextFieldValue, size: Int, own
     }
     DisposableEffect(slot, hits) { onDispose { hits.remove(slot) } }
     Box(Modifier.widthIn(min = 2.dp).onGloballyPositioned { origin = it.positionInRoot() }) {
-        Text(shown, fontSize = size.sp, fontFamily = FontFamily.Serif, color = if (raw.isEmpty() && slot.emptyArgument) Color(0xFFAAAAAA) else Color(0xFF202020),
+        Text(shown, style = mathTextStyle(size.sp), color = if (raw.isEmpty() && slot.emptyArgument) DemosColors.Subtle else DemosColors.Ink,
             softWrap = false, onTextLayout = { layout = it })
         Canvas(Modifier.matchParentSize()) {
             val result = layout ?: return@Canvas
             val selection = currentValue.selection
             if (!selection.collapsed && selection.max > slot.start && selection.min < slot.end) {
                 val path = result.getPathForRange(displayOffset(selection.min), displayOffset(selection.max))
-                drawPath(path, Color(0xFF2D70DA).copy(alpha = .25f))
+                drawPath(path, DemosColors.Blue.copy(alpha = .22f))
             }
             if (active && caret && selection.collapsed) {
                 val rect = result.getCursorRect(displayOffset(selection.end))
-                drawLine(Color(0xFF2D70DA), rect.topLeft, rect.bottomLeft, 1.5.dp.toPx())
+                drawLine(DemosColors.Blue, rect.topLeft, rect.bottomLeft, 1.5.dp.toPx())
             }
         }
     }

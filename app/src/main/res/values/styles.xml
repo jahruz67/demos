@@ -3,10 +3,10 @@
     <style name="Theme.Demos" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:statusBarColor">#000000</item>
-        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:statusBarColor">@color/app_chrome</item>
+        <item name="android:navigationBarColor">@color/app_chrome</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:colorAccent">#2D70D9</item>
+        <item name="android:colorAccent">@color/calculator_accent</item>
     </style>
     <style name="Theme.Demos.Starting" parent="Theme.Demos">
         <item name="android:windowBackground">@drawable/startup_background</item>

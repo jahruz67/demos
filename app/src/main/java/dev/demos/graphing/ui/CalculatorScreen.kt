@@ -27,6 +27,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -43,10 +46,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.*
@@ -63,10 +67,11 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -76,8 +81,10 @@ import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import java.text.DateFormat
 import java.util.Date
@@ -86,10 +93,10 @@ import dev.demos.graphing.plot.PlotExpression
 import dev.demos.graphing.plot.PlotProgram
 import dev.demos.graphing.plot.PlotSettings
 
-private val Blue = Color(0xFF2D70DA)
-private val Header = Color(0xFF292929)
-private val Muted = Color(0xFF656565)
-private val Border = Color(0xFFD3D3D3)
+private val Blue = DemosColors.Blue
+private val Header = DemosColors.Header
+private val Muted = DemosColors.Muted
+private val Border = DemosColors.Border
 private val MathFont = FontFamily.Serif
 
 // Focusing an equation must never reposition the user's worksheet.
@@ -331,7 +338,7 @@ fun CalculatorScreen(
     }
 
     Column(
-        Modifier.fillMaxSize().imePadding().background(Color.White)
+        Modifier.fillMaxSize().imePadding().background(DemosColors.Paper)
             .focusRequester(focusRequester)
             .onPreviewKeyEvent { event ->
                 if (state.layout == CalculatorLayout.Graph || event.type != KeyEventType.KeyDown || showSave || showSettings || showLibrary || showHelp || parseNoteText(currentRow?.text.orEmpty()) != null || parseFolderData(currentRow?.text.orEmpty()) != null || parseImageData(currentRow?.text.orEmpty()) != null || parseInferenceData(currentRow?.text.orEmpty()) != null) false
@@ -432,9 +439,9 @@ fun CalculatorScreen(
                             .semantics { contentDescription = "Resize graph and expressions" }
                     } else Modifier,
                 )
-                if (editingList) Row(Modifier.fillMaxWidth().height(38.dp).background(Color(0xFFF4F7FB)).padding(start = 12.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (editingList) Row(Modifier.fillMaxWidth().height(40.dp).background(DemosColors.BlueSoft).padding(start = 12.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Edit expressions", fontSize = 13.sp, color = Muted, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { editingList = false }) { Text("Done", fontSize = 13.sp) }
+                    TextButton(onClick = { editingList = false }, shape = MaterialTheme.shapes.small) { Text("Done", style = MaterialTheme.typography.labelLarge) }
                 }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -467,9 +474,9 @@ fun CalculatorScreen(
                                         val position = siblings.indexOfFirst { it.id == row.id }
                                         val canMoveUp = position > 0
                                         val canMoveDown = position < siblings.lastIndex
-                                        Row(Modifier.fillMaxWidth().background(Color(0xFFF5F5F5)).padding(start = 42.dp, end = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            Text("Move ↑", color = if (canMoveUp) Blue else Color.LightGray, fontSize = 12.sp, modifier = Modifier.clickable(enabled = canMoveUp) { onAction(CalculatorAction.MoveRow(row.id, -1)) }.padding(vertical = 10.dp))
-                                            Text("Move ↓", color = if (canMoveDown) Blue else Color.LightGray, fontSize = 12.sp, modifier = Modifier.clickable(enabled = canMoveDown) { onAction(CalculatorAction.MoveRow(row.id, 1)) }.padding(vertical = 10.dp))
+                                        Row(Modifier.fillMaxWidth().background(DemosColors.Surface).padding(start = 42.dp, end = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Move ↑", color = if (canMoveUp) Blue else DemosColors.Disabled, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable(enabled = canMoveUp) { onAction(CalculatorAction.MoveRow(row.id, -1)) }.padding(vertical = 10.dp))
+                                            Text("Move ↓", color = if (canMoveDown) Blue else DemosColors.Disabled, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable(enabled = canMoveDown) { onAction(CalculatorAction.MoveRow(row.id, 1)) }.padding(vertical = 10.dp))
                                             Spacer(Modifier.weight(1f))
                                             if (table != null || folder != null || row.id in graphableIds || parseImageData(row.text) != null) {
                                                 Text(if (row.hidden) "Show" else "Hide", color = Muted, fontSize = 12.sp, modifier = Modifier.clickable { onAction(CalculatorAction.ToggleVisibility(row.id)) }.padding(vertical = 10.dp))
@@ -539,7 +546,7 @@ fun CalculatorScreen(
                             item {
                                 Row(Modifier.fillMaxWidth().height(48.dp).semantics { contentDescription = "Add expression at end" }
                                     .clickable { tableEditing = null; appendRequested = true; onAction(CalculatorAction.AppendRow); setKeyboardVisible(true) }) {
-                                    Box(Modifier.width(35.dp).fillMaxHeight().background(Brush.verticalGradient(listOf(Color(0xFFEEEEEE), Color.White)))) {
+                                    Box(Modifier.width(34.dp).fillMaxHeight().background(DemosColors.Surface)) {
                                         Text("${state.rows.size + 1}", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(start = 3.dp, top = 3.dp))
                                     }
                                 }
@@ -579,22 +586,22 @@ fun CalculatorScreen(
     }
 
     tableExportId?.let { id ->
-        AlertDialog(onDismissRequest = { tableExportId = null }, containerColor = Color.White,
+        AlertDialog(onDismissRequest = { tableExportId = null }, containerColor = DemosColors.Paper,
             title = { Text("Export this table") },
             text = { Column {
                 TableFileFormat.entries.forEach { format ->
-                    TextButton(onClick = { onAction(CalculatorAction.ExportTable(id, format)); tableExportId = null }, modifier = Modifier.fillMaxWidth()) {
+                    TextButton(onClick = { onAction(CalculatorAction.ExportTable(id, format)); tableExportId = null }, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
                         Text("${format.name} (.${format.extension})", modifier = Modifier.fillMaxWidth())
                     }
                 }
-            } }, confirmButton = { TextButton(onClick = { tableExportId = null }) { Text("Cancel") } })
+            } }, confirmButton = { TextButton(onClick = { tableExportId = null }, shape = MaterialTheme.shapes.small) { Text("Cancel") } })
     }
-    if (showGraphExport) AlertDialog(onDismissRequest = { showGraphExport = false }, containerColor = Color.White,
+    if (showGraphExport) AlertDialog(onDismissRequest = { showGraphExport = false }, containerColor = DemosColors.Paper,
         title = { Text("Export graph") }, text = { Column {
             GraphExportFormat.entries.forEach { format ->
-                TextButton(onClick = { onAction(CalculatorAction.ExportGraph(format)); showGraphExport = false }, modifier = Modifier.fillMaxWidth()) { Text(format.name) }
+                TextButton(onClick = { onAction(CalculatorAction.ExportGraph(format)); showGraphExport = false }, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) { Text(format.name) }
             }
-        } }, confirmButton = { TextButton(onClick = { showGraphExport = false }) { Text("Cancel") } })
+        } }, confirmButton = { TextButton(onClick = { showGraphExport = false }, shape = MaterialTheme.shapes.small) { Text("Cancel") } })
 
     if (showSave) SaveDialog(state.title, onDismiss = { showSave = false }) { title ->
         onAction(CalculatorAction.Save(title)); showSave = false
@@ -610,24 +617,29 @@ fun CalculatorScreen(
 @Composable
 private fun CalculatorHeader(state: CalculatorUiState, onOpen: () -> Unit, onSave: () -> Unit, on3D: () -> Unit, onMenu: () -> Unit,
                              menuExpanded: Boolean, onMenuDismiss: () -> Unit, menuContent: @Composable ColumnScope.() -> Unit) {
-    Row(Modifier.fillMaxWidth().height(44.dp).background(Header).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onOpen, modifier = Modifier.size(31.dp)) { CalcIcon(IconKind.Folder, Color(0xFFDDDDDD), Modifier.size(23.dp)) }
-        Box(Modifier.padding(start = 2.dp, end = 9.dp).width(1.dp).height(19.dp).background(Color(0xFF888888)))
-        Text(state.title, Modifier.weight(1f).clickable(onClick = onSave), color = Color(0xFFDDDDDD), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Box(Modifier.padding(start = 6.dp).width(55.dp).height(32.dp).clip(RoundedCornerShape(4.dp))
-            .background(if (state.dirty) Blue else Color.Transparent).border(1.dp, if (state.dirty) Color(0xFF367EE8) else Color(0xFF606060), RoundedCornerShape(4.dp))
-            .clickable(onClick = onSave), contentAlignment = Alignment.Center) {
-            Text("Save", color = if (state.dirty) Color.White else Color(0xFF888888), fontSize = 14.sp)
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).background(Header).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onOpen, modifier = Modifier.size(40.dp).semantics { contentDescription = "Open graph library" }) {
+            CalcIcon(IconKind.Folder, DemosColors.OnHeader, Modifier.size(22.dp))
         }
-        Box(Modifier.padding(start = 8.dp).size(width = 34.dp, height = 30.dp).clip(RoundedCornerShape(4.dp))
-            .border(1.dp, if (state.is3D) Blue else Color(0xFF707070), RoundedCornerShape(4.dp))
-            .background(if (state.is3D) Blue else Color.Transparent).clickable(onClick = on3D)
-            .semantics { contentDescription = "Switch to ${if (state.is3D) "2D" else "3D"} graph" }, contentAlignment = Alignment.Center) {
-            Text(if (state.is3D) "2D" else "3D", color = Color(0xFFE6E6E6), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Box(Modifier.padding(start = 2.dp, end = 10.dp).width(1.dp).height(20.dp).background(DemosColors.HeaderBorder))
+        Text(state.title, Modifier.weight(1f).clip(MaterialTheme.shapes.small).clickable(role = Role.Button, onClick = onSave).padding(vertical = 10.dp),
+            color = DemosColors.OnHeader, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Box(Modifier.padding(start = 6.dp).widthIn(min = 56.dp).heightIn(min = 40.dp).clip(MaterialTheme.shapes.small)
+            .background(if (state.dirty) Blue else Color.Transparent).border(1.dp, if (state.dirty) Blue else DemosColors.HeaderBorder, MaterialTheme.shapes.small)
+            .clickable(role = Role.Button, onClick = onSave).padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+            Text("Save", color = DemosColors.OnHeader, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+        }
+        Box(Modifier.padding(start = 8.dp).widthIn(min = 40.dp).heightIn(min = 40.dp).clip(MaterialTheme.shapes.small)
+            .border(1.dp, if (state.is3D) Blue else DemosColors.HeaderBorder, MaterialTheme.shapes.small)
+            .background(if (state.is3D) Blue else Color.Transparent).clickable(role = Role.Button, onClick = on3D)
+            .semantics { contentDescription = "Switch to ${if (state.is3D) "2D" else "3D"} graph" }.padding(horizontal = 8.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+            Text(if (state.is3D) "2D" else "3D", color = DemosColors.OnHeader, style = MaterialTheme.typography.labelMedium, maxLines = 1)
         }
         Box {
-            IconButton(onClick = onMenu, modifier = Modifier.padding(start = 5.dp).size(30.dp)) { CalcIcon(IconKind.More, Color(0xFFDDDDDD), Modifier.size(23.dp)) }
-            DropdownMenu(expanded = menuExpanded, onDismissRequest = onMenuDismiss, modifier = Modifier.background(Color.White), content = menuContent)
+            IconButton(onClick = onMenu, modifier = Modifier.padding(start = 4.dp).size(40.dp).semantics { contentDescription = "Graph menu" }) {
+                CalcIcon(IconKind.More, DemosColors.OnHeader, Modifier.size(22.dp))
+            }
+            DemosDropdownMenu(expanded = menuExpanded, onDismissRequest = onMenuDismiss, content = menuContent)
         }
     }
 }
@@ -635,22 +647,22 @@ private fun CalculatorHeader(state: CalculatorUiState, onOpen: () -> Unit, onSav
 @Composable
 private fun ExpressionToolbar(canUndo: Boolean, canRedo: Boolean, keyboardVisible: Boolean, onAdd: () -> Unit, onUndo: () -> Unit, onRedo: () -> Unit, onCollapse: () -> Unit, fullscreen: Boolean, onFullscreen: () -> Unit,
     addMenuExpanded: Boolean, onAddMenuDismiss: () -> Unit, onInsert: (String) -> Unit, onSettings: () -> Unit, modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth().height(52.dp).background(Brush.verticalGradient(listOf(Color(0xFFFCFCFC), Color(0xFFECECEC))))
+    Row(modifier.fillMaxWidth().height(52.dp).background(DemosColors.Surface)
         .border(width = .5.dp, color = Border).padding(horizontal = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         Box {
             ToolIcon(IconKind.Plus, "Add expression", onClick = onAdd)
-            DropdownMenu(addMenuExpanded, onAddMenuDismiss, offset = androidx.compose.ui.unit.DpOffset(40.dp, (-40).dp),
-                shape = RoundedCornerShape(5.dp), containerColor = Color.White, modifier = Modifier.width(154.dp)) {
+            DemosDropdownMenu(addMenuExpanded, onAddMenuDismiss, offset = androidx.compose.ui.unit.DpOffset(40.dp, (-40).dp),
+                modifier = Modifier.width(180.dp)) {
                 listOf("expression", "note", "table", "inference", "folder", "image").forEach { name ->
-                    DropdownMenuItem(text = { Text(name, fontSize = 15.sp, color = Color(0xFF808080)) },
+                    DropdownMenuItem(text = { Text(name.replaceFirstChar { it.uppercaseChar() }, style = MaterialTheme.typography.bodyMedium) },
                         leadingIcon = { WorksheetItemIcon(name, Modifier.size(24.dp)) },
-                        onClick = { onInsert(name) }, modifier = Modifier.height(41.dp))
+                        onClick = { onInsert(name) })
                 }
             }
         }
         Spacer(Modifier.weight(1f))
-        ToolIcon(IconKind.Undo, "Undo", if (canUndo) Muted else Color(0xFFC8C8C8), onUndo)
-        ToolIcon(IconKind.Redo, "Redo", if (canRedo) Muted else Color(0xFFC8C8C8), onRedo)
+        ToolIcon(IconKind.Undo, "Undo", Muted, onUndo, enabled = canUndo)
+        ToolIcon(IconKind.Redo, "Redo", Muted, onRedo, enabled = canRedo)
         Spacer(Modifier.weight(1f))
         ToolIcon(IconKind.Keyboard, if (keyboardVisible) "Hide keyboard" else "Show keyboard", if (keyboardVisible) Blue else Muted, onCollapse)
         ToolIcon(IconKind.Settings, "Settings", Muted, onSettings)
@@ -672,16 +684,20 @@ private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, v
     val minimumHeight = if (largeExpression) 84.dp else 52.dp
     Column(Modifier.fillMaxWidth().border(if (selected) 1.dp else .5.dp, if (selected) Blue else Border)) {
         Row(Modifier.fillMaxWidth().heightIn(min = minimumHeight).height(IntrinsicSize.Min)) {
-            Column(Modifier.width(34.dp).fillMaxHeight().background(if (selected) Blue else Color(0xFFEEEEEE)), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("$number", color = if (selected) Color.White else Muted, fontSize = 10.sp, modifier = Modifier.align(Alignment.Start).padding(start = 2.dp, top = 2.dp))
+            Column(Modifier.width(34.dp).fillMaxHeight().background(if (selected) Blue else DemosColors.Surface), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("$number", color = if (selected) Color.White else Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.align(Alignment.Start).padding(start = 6.dp, top = 4.dp))
                 if (slider != null) {
-                    Text(if (slider.playing) "Ⅱ" else "▶", color = if (selected) Color.White else Muted, fontSize = 20.sp,
-                        modifier = Modifier.padding(top = 4.dp).size(28.dp).border(1.dp, if (selected) Color.White else Muted, RoundedCornerShape(20.dp)).clickable { onAction(CalculatorAction.ToggleSlider(slider.name)) }.padding(start = 5.dp, top = 1.dp))
-                    SliderAnimationMenu(slider, onAction)
+                    Box(Modifier.padding(top = 4.dp).size(28.dp).clip(RoundedCornerShape(14.dp))
+                        .border(1.dp, if (selected) Color.White else Muted, RoundedCornerShape(14.dp))
+                        .clickable(role = Role.Button) { onAction(CalculatorAction.ToggleSlider(slider.name)) }
+                        .semantics { contentDescription = if (slider.playing) "Pause slider ${slider.name}" else "Play slider ${slider.name}" }, contentAlignment = Alignment.Center) {
+                        PlaybackIcon(slider.playing, if (selected) Color.White else Muted)
+                    }
+                    SliderAnimationMenu(slider, onAction, selected)
                 } else if (row.error != null && missingVariables.isEmpty()) {
                     Canvas(Modifier.padding(top = 4.dp).size(23.dp)) {
                         val p = Path().apply { moveTo(size.width / 2, 0f); lineTo(size.width, size.height); lineTo(0f, size.height); close() }
-                        drawPath(p, Color(0xFFE9783E))
+                        drawPath(p, DemosColors.Error)
                         drawLine(Color.White, Offset(size.width / 2, size.height * .30f), Offset(size.width / 2, size.height * .64f), 2.dp.toPx())
                         drawCircle(Color.White, 1.dp.toPx(), Offset(size.width / 2, size.height * .82f))
                     }
@@ -702,9 +718,7 @@ private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, v
             Column(Modifier.weight(1f).padding(start = 16.dp, top = 10.dp, bottom = if (hasResult || row.error != null) 4.dp else 10.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     MathEditor(value, selected, number, Modifier.weight(1f), onInput, onInputFocus, onSelect, fontSize = 24, minimumHeight = 36.dp, placeholder = "")
-                    IconButton(onClick = onDelete, modifier = Modifier.size(44.dp).semantics { contentDescription = "Delete expression $number" }) {
-                        CalcIcon(IconKind.Delete, Color(0xFFBBBBBB), Modifier.size(21.dp))
-                    }
+                    DismissControl("Delete expression $number", onClick = onDelete)
                 }
                 if (row.isEvaluating) {
                     Row(Modifier.padding(top = 8.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -712,28 +726,28 @@ private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, v
                         Text("  Calculating…", color = Muted, fontSize = 11.sp)
                     }
                 } else if (missingVariables.isNotEmpty()) {
-                    Row(Modifier.padding(top = 4.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(if (missingVariables.size > 1) "add sliders:" else "add slider:", fontSize = 11.sp, color = Muted)
                         missingVariables.forEach { name ->
-                            Text(name, color = Color.White, fontSize = 13.sp, modifier = Modifier.clip(RoundedCornerShape(2.dp)).background(Blue)
-                                .clickable { onAction(CalculatorAction.CreateSliders(listOf(name))) }.padding(horizontal = 8.dp, vertical = 2.dp))
+                            Text(name, color = Blue, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clip(MaterialTheme.shapes.extraSmall).background(DemosColors.BlueSoft)
+                                .clickable { onAction(CalculatorAction.CreateSliders(listOf(name))) }.padding(horizontal = 8.dp, vertical = 4.dp))
                         }
                         if (missingVariables.size > 1) Text("all", color = Blue, fontSize = 11.sp, modifier = Modifier.clickable { onAction(CalculatorAction.CreateSliders(missingVariables)) })
                     }
                 } else if (row.error != null) {
-                    Text(row.error, color = Color(0xFFB8532D), fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(end = 12.dp, top = 4.dp, bottom = 5.dp))
+                    Text(row.error, color = DemosColors.Error, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(end = 12.dp, top = 4.dp, bottom = 5.dp))
                 } else if (hasResult) {
                     val showingDecimal = row.result.isBlank() || decimal && row.approximate.isNotBlank()
                     val result = if (showingDecimal) row.approximate else row.result
                     Row(Modifier.fillMaxWidth().padding(top = 5.dp, end = 5.dp, bottom = 1.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         if (row.result.isNotBlank() && row.approximate.isNotBlank() && row.approximate != row.result) {
-                            Text(if (showingDecimal) "≈" else "=", color = Color(0xFF999999), fontSize = 18.sp, modifier = Modifier.padding(end = 6.dp).clickable { decimal = !decimal })
-                        } else Text(if (showingDecimal) "≈" else "=", color = Color(0xFF999999), fontSize = 18.sp, modifier = Modifier.padding(end = 6.dp))
-                        Box(Modifier.widthIn(max = 250.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFFF7F7F7)).border(.7.dp, Border, RoundedCornerShape(4.dp))
+                            Text(if (showingDecimal) "≈" else "=", color = Muted, style = mathTextStyle(18.sp), modifier = Modifier.padding(end = 6.dp).clickable { decimal = !decimal })
+                        } else Text(if (showingDecimal) "≈" else "=", color = Muted, style = mathTextStyle(18.sp), modifier = Modifier.padding(end = 6.dp))
+                        Box(Modifier.weight(1f, fill = false).widthIn(max = 250.dp).clip(MaterialTheme.shapes.small).background(DemosColors.Surface).border(1.dp, Border, MaterialTheme.shapes.small)
                             .semantics { contentDescription = "Result $number" }
                             .combinedClickable(onClick = { decimal = !decimal }, onLongClick = {
                                 (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Result", result))
-                            }).padding(horizontal = 7.dp, vertical = 3.dp)) {
+                            }).padding(horizontal = 8.dp, vertical = 4.dp).horizontalScroll(rememberScrollState())) {
                             MathExpression(formatResultNumber(result), 19)
                         }
                     }
@@ -748,36 +762,38 @@ private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, v
 private fun SliderControl(slider: SliderUi, onAction: (CalculatorAction) -> Unit) {
     if (slider.name == "C") Text("C = ${formatNumber(slider.value)}", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(start = 50.dp, top = 3.dp))
     Row(Modifier.fillMaxWidth().padding(start = 41.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(if (slider.playing) "Ⅱ" else "▶", color = Muted, modifier = Modifier.width(25.dp).clickable { onAction(CalculatorAction.ToggleSlider(slider.name)) })
-        Text(formatNumber(slider.min), fontSize = 10.sp, color = Muted)
+        IconButton(onClick = { onAction(CalculatorAction.ToggleSlider(slider.name)) }, modifier = Modifier.size(32.dp)
+            .semantics { contentDescription = if (slider.playing) "Pause slider ${slider.name}" else "Play slider ${slider.name}" }) {
+            PlaybackIcon(slider.playing, Muted)
+        }
+        Text(formatNumber(slider.min), style = MaterialTheme.typography.labelSmall, color = Muted)
         Slider(value = slider.value.toFloat().coerceIn(slider.min.toFloat(), slider.max.toFloat()),
             onValueChange = { value ->
                 val snapped = if (slider.step > 0) (value / slider.step).roundToInt() * slider.step else value.toDouble()
                 onAction(CalculatorAction.SetSlider(slider.name, snapped))
             }, valueRange = slider.min.toFloat()..slider.max.toFloat(),
             modifier = Modifier.weight(1f).height(29.dp), colors = SliderDefaults.colors(thumbColor = Blue, activeTrackColor = Blue))
-        Text(formatNumber(slider.max), fontSize = 10.sp, color = Muted)
+        Text(formatNumber(slider.max), style = MaterialTheme.typography.labelSmall, color = Muted)
     }
 }
 
 @Composable
 private fun NoteExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, note: String, onSelect: () -> Unit, onDelete: () -> Unit, onChange: (String) -> Unit) {
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).border(if (selected) 1.dp else .5.dp, if (selected) Blue else Border)) {
-        Box(Modifier.width(34.dp).fillMaxHeight().background(if (selected) Blue else Color(0xFFEEEEEE)).clickable(onClick = onSelect)) {
-            Text("$number", color = if (selected) Color.White else Muted, fontSize = 10.sp, modifier = Modifier.padding(start = 2.dp, top = 2.dp))
-            Text("T", color = if (selected) Color.White else Muted, fontSize = 24.sp, fontFamily = MathFont,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 18.dp))
+        Box(Modifier.width(34.dp).fillMaxHeight().background(if (selected) Blue else DemosColors.Surface).clickable(onClick = onSelect)) {
+            Text("$number", color = if (selected) Color.White else Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 6.dp, top = 4.dp))
+            WorksheetItemIcon("note", Modifier.align(Alignment.TopCenter).padding(top = 22.dp).size(22.dp), if (selected) Color.White else Muted)
         }
         Column(Modifier.weight(1f).padding(start = 14.dp, end = 5.dp, top = 6.dp, bottom = 14.dp)) {
-            Row(Modifier.fillMaxWidth().height(26.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Note", color = Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                IconButton(onClick = onDelete, modifier = Modifier.size(25.dp)) { CalcIcon(IconKind.Delete, Color(0xFFCCCCCC), Modifier.size(20.dp)) }
+            Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Note", color = Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                DismissControl("Delete note $number", onClick = onDelete)
             }
             BasicTextField(value = note, onValueChange = onChange,
-                textStyle = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, color = Color(0xFF333333)),
+                textStyle = interfaceTextStyle(15.sp).copy(color = DemosColors.Ink),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 45.dp).padding(end = 12.dp).onFocusChanged { if (it.isFocused) onSelect() },
                 decorationBox = { inner ->
-                    Box { if (note.isEmpty()) Text("Add a note…", color = Color(0xFFAAAAAA), fontSize = 15.sp); inner() }
+                    Box { if (note.isEmpty()) Text("Add a note…", color = DemosColors.Subtle, style = interfaceTextStyle(15.sp)); inner() }
                 })
         }
     }
@@ -785,43 +801,48 @@ private fun NoteExpressionItem(row: ExpressionRow, number: Int, selected: Boolea
 
 @Composable
 private fun FolderExpressionItem(number: Int, selected: Boolean, folder: FolderData, onSelect: () -> Unit, onDelete: () -> Unit, onChange: (FolderData) -> Unit) {
-    Row(Modifier.fillMaxWidth().height(54.dp).background(Color(0xFFF7F7F7)).border(if (selected) 1.dp else .5.dp, if (selected) Blue else Border), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(34.dp).fillMaxHeight().background(if (selected) Blue else Color(0xFFE7E7E7)).clickable(onClick = onSelect)) {
-            Text("$number", color = if (selected) Color.White else Muted, fontSize = 10.sp, modifier = Modifier.padding(start = 2.dp, top = 2.dp))
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).height(IntrinsicSize.Min).background(DemosColors.Surface).border(if (selected) 1.dp else .5.dp, if (selected) Blue else Border), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(34.dp).fillMaxHeight().background(if (selected) Blue else DemosColors.KeySecondary).clickable(onClick = onSelect)) {
+            Text("$number", color = if (selected) Color.White else Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 6.dp, top = 4.dp))
             CalcIcon(IconKind.Folder, if (selected) Color.White else Muted, Modifier.size(23.dp).align(Alignment.Center).padding(top = 6.dp))
         }
         Box(Modifier.width(30.dp).fillMaxHeight().clickable { onChange(folder.copy(collapsed = !folder.collapsed)) }
             .semantics { contentDescription = if (folder.collapsed) "Expand folder ${folder.title}" else "Collapse folder ${folder.title}" }, contentAlignment = Alignment.Center) {
-            Text(if (folder.collapsed) "▸" else "▾", fontSize = 23.sp, color = Muted)
+            ChevronIcon(expanded = !folder.collapsed, color = Muted)
         }
         BasicTextField(value = folder.title, onValueChange = { onChange(folder.copy(title = it)) }, singleLine = true,
-            textStyle = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium, color = Color(0xFF444444)),
+            textStyle = interfaceTextStyle(16.sp, FontWeight.Medium).copy(color = DemosColors.Ink),
             modifier = Modifier.weight(1f).onFocusChanged { if (it.isFocused) onSelect() },
-            decorationBox = { inner -> Box { if (folder.title.isEmpty()) Text("Folder", color = Color(0xFFAAAAAA), fontSize = 16.sp); inner() } })
-        IconButton(onClick = onDelete, modifier = Modifier.size(35.dp)) { CalcIcon(IconKind.Delete, Color(0xFFCCCCCC), Modifier.size(21.dp)) }
+            decorationBox = { inner -> Box { if (folder.title.isEmpty()) Text("Folder", color = DemosColors.Subtle, style = interfaceTextStyle(16.sp, FontWeight.Medium)); inner() } })
+        DismissControl("Delete folder $number", onClick = onDelete)
     }
 }
 
 @Composable
 internal fun ColorPaletteDialog(selected: Int, onDismiss: () -> Unit, onPick: (Int) -> Unit) {
     val colors = listOf(0xFFC74440, 0xFF2D70B3, 0xFF388C46, 0xFF6042A6, 0xFFFA7E19, 0xFF000000, 0xFFE8B735, 0xFFFA8EC2, 0xFF0099AA, 0xFF888888, 0xFF8C564B, 0xFF6B81C7)
-    AlertDialog(onDismissRequest = onDismiss, containerColor = Color.White, title = { Text("Expression color") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
-            colors.chunked(6).forEach { line ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    line.forEach { packed ->
+    val names = listOf("Red", "Blue", "Green", "Purple", "Orange", "Black", "Yellow", "Pink", "Teal", "Gray", "Brown", "Periwinkle")
+    AlertDialog(onDismissRequest = onDismiss, containerColor = DemosColors.Paper, title = { Text("Expression color") }, text = {
+        Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            colors.withIndex().chunked(6).forEach { line ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    line.forEach { (index, packed) ->
                         val color = packed.toInt()
-                        Box(Modifier.size(32.dp).clip(RoundedCornerShape(16.dp)).background(Color(color))
-                            .border(if (color == selected) 3.dp else 0.dp, Color(0xFFDDDDDD), RoundedCornerShape(16.dp))
-                            .clickable { onPick(color) }.semantics { contentDescription = "Color ${Integer.toHexString(color)}" }, contentAlignment = Alignment.Center) {
-                            if (color == selected) Text("✓", color = Color.White, fontSize = 18.sp)
+                        val circle = androidx.compose.foundation.shape.CircleShape
+                        Box(Modifier.weight(1f).aspectRatio(1f).clip(circle)
+                            .selectable(selected = color == selected, role = Role.RadioButton, onClick = { onPick(color) })
+                            .semantics { contentDescription = names[index] }
+                            .border(if (color == selected) 2.dp else 0.dp, Blue, circle).padding(4.dp)) {
+                            Box(Modifier.fillMaxSize().clip(circle).background(Color(color)), contentAlignment = Alignment.Center) {
+                                if (color == selected) CheckmarkIcon(color = if (Color(color).luminance() > .45f) DemosColors.Ink else Color.White)
+                            }
                         }
                     }
                 }
             }
             Text("Tap the expression icon to show or hide its graph.", color = Muted, fontSize = 12.sp)
         }
-    }, confirmButton = { TextButton(onClick = onDismiss) { Text("Done", color = Blue) } })
+    }, confirmButton = { TextButton(onClick = onDismiss, shape = MaterialTheme.shapes.small) { Text("Done") } })
 }
 
 private fun formatNumber(n: Double) = if (n == n.toLong().toDouble()) n.toLong().toString() else "%.3g".format(n)
@@ -829,14 +850,14 @@ private fun subscript(number: Int) = number.toString().map { "₀₁₂₃₄₅
 
 @Composable
 private fun KeyboardHeightControl(scale: Float, onChange: (Float) -> Unit) {
-    Row(Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 8.dp),
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp),
         horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-        Text("Keyboard height", fontSize = 11.sp, color = Muted)
+        Text("Keyboard height", style = MaterialTheme.typography.bodySmall, color = Muted)
         Slider(value = scale.coerceIn(.6f, 1.4f), onValueChange = onChange, valueRange = .6f..1.4f, steps = 15,
-            modifier = Modifier.padding(horizontal = 8.dp).width(120.dp).height(32.dp)
+            modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
                 .semantics { contentDescription = "Keyboard height" },
             colors = SliderDefaults.colors(thumbColor = Blue, activeTrackColor = Blue))
-        Text("${(scale * 100).roundToInt()}%", fontSize = 11.sp, color = Muted, modifier = Modifier.width(34.dp))
+        Text("${(scale * 100).roundToInt()}%", style = MaterialTheme.typography.labelMedium, color = Muted, textAlign = TextAlign.End, modifier = Modifier.widthIn(min = 40.dp))
     }
 }
 
@@ -861,7 +882,7 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
     }
     var keypadTop by remember { mutableIntStateOf(0) }
     Column(Modifier.fillMaxWidth().onGloballyPositioned { keypadTop = it.positionInWindow().y.roundToInt() }
-        .background(Color(0xFFF0F0F0)).border(.5.dp, Border).padding(5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        .background(DemosColors.Keypad).border(.5.dp, Border).padding(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Box(Modifier.fillMaxWidth().height(20.dp)
             .draggable(resizeState, Orientation.Vertical, onDragStarted = { dragScale = keyScale })
             .semantics {
@@ -875,7 +896,7 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
                     } else false
                 }
             }, contentAlignment = Alignment.Center) {
-            Box(Modifier.width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Blue))
+            Box(Modifier.width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(DemosColors.Disabled))
         }
         if (!tablet) {
             Row(Modifier.fillMaxWidth().height(34.dp * keyScale), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -974,23 +995,54 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
 }
 
 @Composable
-internal fun KeyTile(label: String, modifier: Modifier = Modifier, gray: Boolean = false, blue: Boolean = false, alphabet: Boolean = false, onClick: () -> Unit) {
-    val top = when { blue -> Color(0xFF337BE5); gray -> Color(0xFFD1D1D1); else -> Color.White }
-    val bottom = when { blue -> Blue; gray -> Color(0xFFC7C7C7); else -> Color(0xFFFAFAFA) }
-    BoxWithConstraints(modifier.fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(Brush.verticalGradient(listOf(top, bottom)))
-        .border(.7.dp, if (blue) Color(0xFF377FE9) else Color(0xFFD5D5D5), RoundedCornerShape(2.dp))
-        .clickable(onClick = onClick).semantics { contentDescription = when (label) { "⌫" -> "Backspace"; "↵" -> "New expression"; "edit" -> "Edit expression"; "speak" -> "Read expression aloud"; "space" -> "Space"; "funcs" -> "Functions"; else -> label } }, contentAlignment = Alignment.Center) {
-        // Keep labels inside compact key rows when the keyboard is shrunk.
-        val labelScale = (maxHeight / 36.dp).coerceAtMost(1f)
+internal fun KeyTile(label: String, modifier: Modifier = Modifier, gray: Boolean = false, blue: Boolean = false, alphabet: Boolean = false, active: Boolean = false, onClick: () -> Unit) {
+    val fill = when { blue -> Blue; active -> DemosColors.BlueSoft; gray -> DemosColors.KeySecondary; else -> DemosColors.Paper }
+    val ink = when { blue -> Color.White; active -> Blue; else -> DemosColors.Ink }
+    BoxWithConstraints(modifier.fillMaxHeight().clip(MaterialTheme.shapes.small).background(fill)
+        .border(1.dp, if (blue || active) Blue else Border, MaterialTheme.shapes.small)
+        .clickable(role = Role.Button, onClick = onClick).semantics {
+            contentDescription = when (label) { "⌫" -> "Backspace"; "↵" -> "New expression"; "edit" -> "Edit expression"; "speak" -> "Read expression aloud"; "space" -> "Space"; "funcs" -> "Functions"; else -> label }
+            if (label == "←" || label == "→") stateDescription = if (label == "←") "Move cursor left" else "Move cursor right"
+        }, contentAlignment = Alignment.Center) {
+        val iconSize = minOf(22.dp, (maxHeight - 8.dp).coerceAtLeast(0.dp), (maxWidth - 8.dp).coerceAtLeast(0.dp))
         when (label) {
-            "⌫" -> CalcIcon(IconKind.Backspace, Color.Black, Modifier.size(20.dp))
-            "↵" -> CalcIcon(IconKind.Return, Color.White, Modifier.size(27.dp))
-            "edit" -> Text("✎", color = Color(0xFF828282), fontSize = 18.sp * labelScale)
-            "speak" -> CalcIcon(IconKind.Speaker, Color(0xFF858585), Modifier.size(18.dp))
-            else -> Text(if (label == "funcs") "functions" else label, color = if (blue) Color.White else Color.Black,
-                fontSize = (when { alphabet -> 20.sp; label.length == 1 && label[0].isDigit() -> 30.sp; label in listOf("ABC", "123", "funcs", "space") -> 15.sp; label.length > 2 -> 18.sp; else -> 24.sp }) * labelScale,
-                fontFamily = if (alphabet || label in listOf("ABC", "123", "funcs", "space", "←", "→")) FontFamily.SansSerif else MathFont,
-                fontStyle = if (!alphabet && (label in listOf("x", "y", "a²", "aᵇ") || (label.length == 1 && label[0].isLetter()))) FontStyle.Italic else FontStyle.Normal)
+            "⌫" -> CalcIcon(IconKind.Backspace, ink, Modifier.size(iconSize))
+            "↵" -> CalcIcon(IconKind.Return, ink, Modifier.size(iconSize))
+            "speak" -> CalcIcon(IconKind.Speaker, ink, Modifier.size(iconSize))
+            "←" -> CalcIcon(IconKind.ArrowLeft, ink, Modifier.size(iconSize))
+            "→" -> CalcIcon(IconKind.ArrowRight, ink, Modifier.size(iconSize))
+            else -> {
+                val variable = !alphabet && (label in listOf("a²", "aᵇ", "aₙ", "eˣ") || (label.length == 1 && label[0].isLetter() && label != "π"))
+                val size = when {
+                    alphabet -> 20.sp
+                    label.length == 1 && label[0].isDigit() -> 26.sp
+                    label in listOf("ABC", "123", "funcs", "space") -> 13.sp
+                    label.length > 2 -> 18.sp
+                    else -> 24.sp
+                }
+                // Use one typeface for scripts instead of mixing Unicode fallback glyphs.
+                val caption = remember(label) { buildAnnotatedString {
+                    val script = when (label) { "a²" -> "2"; "aᵇ" -> "b"; "aₙ" -> "n"; "eˣ" -> "x"; else -> null }
+                    append(if (script != null) label.first().toString() + script else if (label == "funcs") "functions" else label)
+                    if (script != null) addStyle(SpanStyle(fontSize = .65.em,
+                        baselineShift = if (label == "aₙ") BaselineShift.Subscript else BaselineShift.Superscript,
+                        fontStyle = if (script[0].isLetter()) FontStyle.Italic else FontStyle.Normal), 1, 2)
+                } }
+                val style = interfaceTextStyle(size).copy(
+                    color = ink, lineHeight = size * 1.3f,
+                    fontFamily = if (variable || label in listOf("π", "√", "|a|")) MathFont else FontFamily.SansSerif,
+                    fontStyle = if (variable) FontStyle.Italic else FontStyle.Normal,
+                )
+                val measurer = rememberTextMeasurer(cacheSize = 2)
+                val measured = measurer.measure(caption, style, softWrap = false, maxLines = 1)
+                val density = LocalDensity.current
+                val scale = with(density) {
+                    minOf(1f, (maxWidth - 8.dp).toPx() / measured.size.width.coerceAtLeast(1),
+                        (maxHeight - 4.dp).toPx() / measured.size.height.coerceAtLeast(1)).coerceIn(.1f, 1f)
+                }
+                Text(caption, style = style.copy(fontSize = size * scale, lineHeight = size * (1.3f * scale)),
+                    maxLines = 1, softWrap = false)
+            }
         }
     }
 }
@@ -1003,9 +1055,9 @@ internal fun MathExpression(source: String, fontSize: Int = 24, showCursor: Bool
         val args = integral.second
         val variable = args.getOrElse(1) { "x" }.ifBlank { "x" }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("∫", fontSize = (fontSize * 1.9).sp, fontFamily = MathFont, lineHeight = (fontSize * 2.05).sp)
+            Text("∫", style = mathTextStyle((fontSize * 1.9).sp))
             if (args.size >= 4) {
-                Column(Modifier.offset(x = (-3).dp).height((fontSize * 2.1).dp), verticalArrangement = Arrangement.SpaceBetween) {
+                Column(Modifier.offset(x = (-3).dp).height(with(LocalDensity.current) { (fontSize * 2.1).sp.toDp() }), verticalArrangement = Arrangement.SpaceBetween) {
                     PrettyText(args[3], (fontSize * .64).toInt())
                     PrettyText(args[2], (fontSize * .64).toInt())
                 }
@@ -1019,7 +1071,7 @@ internal fun MathExpression(source: String, fontSize: Int = 24, showCursor: Bool
                     MathCaret(fontSize)
                     PrettyText(body.drop(bodyCursor), fontSize)
                 } else {
-                    if (body.isEmpty()) Text("□", fontSize = fontSize.sp, color = Color(0xFFBBBBBB), fontFamily = MathFont)
+                    if (body.isEmpty()) Text("□", style = mathTextStyle(fontSize.sp), color = DemosColors.Subtle)
                     else PrettyText(body, fontSize)
                 }
                 PrettyText(" d$variable", fontSize)
@@ -1053,7 +1105,7 @@ internal fun RenderMathDisplay(display: MathDisplay, fontSize: Int) {
         ) {
             val childSize = (fontSize * .85).toInt().coerceAtLeast(12)
             RenderMathDisplay(display.numerator, childSize)
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF111111)))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(DemosColors.Ink))
             RenderMathDisplay(display.denominator, childSize)
         }
     }
@@ -1061,13 +1113,13 @@ internal fun RenderMathDisplay(display: MathDisplay, fontSize: Int) {
 
 @Composable
 private fun MathCaret(fontSize: Int) {
-    Box(Modifier.padding(horizontal = .5.dp).width(1.dp).height((fontSize * 1.1).dp).background(Blue))
+    Box(Modifier.padding(horizontal = .5.dp).width(1.dp).height(with(LocalDensity.current) { (fontSize * 1.1).sp.toDp() }).background(Blue))
 }
 
 @Composable
 private fun PrettyText(source: String, fontSize: Int) {
     val pretty = remember(source, fontSize) { prettyMath(source, fontSize) }
-    Text(pretty, fontSize = fontSize.sp, fontFamily = MathFont, color = Color(0xFF111111), lineHeight = (fontSize * 1.4).sp, softWrap = false)
+    Text(pretty, style = mathTextStyle(fontSize.sp), softWrap = false)
 }
 
 private fun prettyMath(source: String, fontSize: Int) = buildAnnotatedString {
@@ -1130,21 +1182,21 @@ private fun parseIntegral(source: String): Pair<String, List<String>>? {
 @Composable
 private fun SaveDialog(initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var title by remember { mutableStateOf(initial) }
-    AlertDialog(onDismissRequest = onDismiss, containerColor = Color.White,
+    AlertDialog(onDismissRequest = onDismiss, containerColor = DemosColors.Paper,
         title = { Text("Save graph") },
-        text = { OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Graph title") }, singleLine = true, modifier = Modifier.fillMaxWidth()) },
-        confirmButton = { TextButton(onClick = { onSave(title.trim().ifEmpty { "Untitled Graph" }) }) { Text("Save", color = Blue) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Muted) } },
+        text = { OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Graph title") }, singleLine = true, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) },
+        confirmButton = { Button(onClick = { onSave(title.trim().ifEmpty { "Untitled Graph" }) }, shape = MaterialTheme.shapes.small) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss, shape = MaterialTheme.shapes.small) { Text("Cancel") } },
     )
 }
 
 @Composable
 private fun LibrarySheet(graphs: List<SavedGraph>, onDismiss: () -> Unit, onAction: (CalculatorAction) -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = DemosColors.Paper) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("My graphs", fontSize = 23.sp, modifier = Modifier.weight(1f))
-                TextButton(onClick = { onAction(CalculatorAction.New); onDismiss() }) { Text("+ New", color = Blue) }
+                Text("My graphs", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                TextButton(onClick = { onAction(CalculatorAction.New); onDismiss() }, shape = MaterialTheme.shapes.small) { Text("+ New") }
             }
             Text("Saved on this device", fontSize = 12.sp, color = Muted, modifier = Modifier.padding(bottom = 12.dp))
             if (graphs.isEmpty()) {
@@ -1155,16 +1207,16 @@ private fun LibrarySheet(graphs: List<SavedGraph>, onDismiss: () -> Unit, onActi
                         Row(Modifier.fillMaxWidth().clickable { onAction(CalculatorAction.Open(item.id)); onDismiss() }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             CalcIcon(IconKind.Folder, Blue, Modifier.size(27.dp))
                             Column(Modifier.weight(1f).padding(start = 13.dp)) {
-                                Text(item.title, fontSize = 16.sp)
-                                Text(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(item.updatedAt)), fontSize = 11.sp, color = Muted)
+                                Text(item.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(item.updatedAt)), style = MaterialTheme.typography.bodySmall, color = Muted)
                             }
-                            IconButton(onClick = { onAction(CalculatorAction.DeleteGraph(item.id)) }) { CalcIcon(IconKind.Delete, Color(0xFFAAAAAA), Modifier.size(17.dp)) }
+                            DismissControl("Delete graph ${item.title}", onClick = { onAction(CalculatorAction.DeleteGraph(item.id)) })
                         }
                         HorizontalDivider(color = Border)
                     }
                 }
             }
-            TextButton(onClick = { onAction(CalculatorAction.ImportDocument); onDismiss() }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) { Text("Import graph file", color = Blue) }
+            TextButton(onClick = { onAction(CalculatorAction.ImportDocument); onDismiss() }, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) { Text("Import graph file") }
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -1187,16 +1239,16 @@ private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDi
             Box(Modifier.matchParentSize().clickable(onClick = onDismiss))
             Surface(Modifier.align(Alignment.TopEnd).padding(12.dp).widthIn(max = 400.dp).fillMaxWidth()
                 .heightIn(max = (maxHeight - 24.dp).coerceAtLeast(0.dp)),
-                shape = RoundedCornerShape(6.dp), color = Color.White, shadowElevation = 8.dp, border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
-                Column(Modifier.verticalScroll(rememberScrollState()).padding(15.dp)) {
+                shape = MaterialTheme.shapes.large, color = DemosColors.Paper, shadowElevation = 8.dp, border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (!graphSettings) "App settings" else if (state.is3D) "3D graph settings" else "2D graph settings", fontSize = 18.sp, modifier = Modifier.weight(1f))
-                Text("×", modifier = Modifier.clickable(onClick = onDismiss).padding(horizontal = 6.dp), fontSize = 24.sp, color = Muted)
+                Text(if (!graphSettings) "App settings" else if (state.is3D) "3D graph settings" else "2D graph settings", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                DismissControl("Close settings", onClick = onDismiss)
             }
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
             if (graphSettings) {
             if (state.is3D) {
-                Text("Perspective", fontSize = 16.sp)
+                Text("Perspective", style = MaterialTheme.typography.titleSmall)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Orthographic", fontSize = 11.sp, color = Muted)
                     Slider(appearance.perspective, { onAction(CalculatorAction.SetAppearance(appearance.copy(perspective = it))) },
@@ -1216,25 +1268,25 @@ private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDi
                         1 -> appearance.copy(yLabel = text)
                         else -> appearance.copy(zLabel = text)
                     }))
-                }, label = { Text("${"XYZ"[axis]}-axis label") }, singleLine = true,
+                }, label = { Text("${"XYZ"[axis]}-axis label") }, singleLine = true, shape = MaterialTheme.shapes.small,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 5.dp))
             }
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
             if (state.is3D) {
-                Text("${if (showBounds) "▾" else "▸"} All bounds", modifier = Modifier.fillMaxWidth().clickable { showBounds = !showBounds }.padding(vertical = 8.dp), fontSize = 16.sp)
+                DisclosureHeader("All bounds", showBounds) { showBounds = !showBounds }
                 if (showBounds) BoundFieldPair("All", ranges[0], ranges[1],
                     { value -> for (i in listOf(0, 2, 4)) ranges[i] = value },
                     { value -> for (i in listOf(1, 3, 5)) ranges[i] = value })
-            } else Text("Viewing window", fontSize = 16.sp)
+            } else Text("Viewing window", style = MaterialTheme.typography.titleSmall)
             if (showBounds) {
             Text("Leave both bounds blank for the default view.", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 4.dp, bottom = 7.dp))
             repeat(if (state.is3D) 3 else 2) { axis ->
                 BoundFieldPair("${"xyz"[axis]}", ranges[axis * 2], ranges[axis * 2 + 1],
                     { ranges[axis * 2] = it }, { ranges[axis * 2 + 1] = it })
             }
-            boundsError?.let { Text(it, fontSize = 11.sp, color = Color(0xFFB8532F), modifier = Modifier.padding(top = 5.dp)) }
+            boundsError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = DemosColors.Error, modifier = Modifier.padding(top = 5.dp)) }
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { onAction(CalculatorAction.SetBounds(GraphBounds())); boundsError = null }) { Text("Reset bounds", fontSize = 12.sp, color = Muted) }
+                OutlinedButton(onClick = { onAction(CalculatorAction.SetBounds(GraphBounds())); boundsError = null }, shape = MaterialTheme.shapes.small) { Text("Reset bounds") }
                 Button(onClick = {
                     val values = ranges.map { it.trim().takeIf(String::isNotEmpty)?.toDoubleOrNull() }
                     val malformed = ranges.indices.any { ranges[it].isNotBlank() && (values[it] == null || values[it]?.isFinite() != true) }
@@ -1248,30 +1300,30 @@ private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDi
                             values[6]!!, values[7]!!, values[8]!!, values[9]!!, values[10]!!, values[11]!!)))
                         boundsError = null
                     }
-                }) { Text("Apply", fontSize = 12.sp) }
+                }, shape = MaterialTheme.shapes.small) { Text("Apply") }
             }
             }
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
-            Text("${if (showMore) "▾" else "▸"} More options", modifier = Modifier.fillMaxWidth().clickable { showMore = !showMore; if (showMore) showBounds = true }.padding(vertical = 8.dp), fontSize = 16.sp)
+            DisclosureHeader("More options", showMore) { showMore = !showMore; if (showMore) showBounds = true }
             if (showMore) {
                 if (!state.is3D) {
-                    Text("X-axis scale", fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
+                    Text("X-axis scale", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 6.dp))
                     SettingsSegments("Linear", "Logarithmic", !appearance.logX) { onAction(CalculatorAction.SetAppearance(appearance.copy(logX = !it))) }
-                    Text("Y-axis scale", fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
+                    Text("Y-axis scale", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 6.dp))
                     SettingsSegments("Linear", "Logarithmic", !appearance.logY) { onAction(CalculatorAction.SetAppearance(appearance.copy(logY = !it))) }
                     Text("Logarithmic axes display positive values in powers of 10.", fontSize = 11.sp, color = Muted)
                 }
-                Text("Parametric ranges", fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
+                Text("Parametric ranges", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 6.dp))
                 repeat(3) { parameter ->
                     val index = 6 + parameter * 2
                     BoundFieldPair("${"tuv"[parameter]}", ranges[index], ranges[index + 1], { ranges[index] = it }, { ranges[index + 1] = it })
                 }
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            Text("Angle measure", fontSize = 14.sp, modifier = Modifier.padding(bottom = 6.dp))
+            Text("Angle measure", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 6.dp))
             SettingsSegments("Radians", "Degrees", !state.degreeMode) { onAction(CalculatorAction.SetDegreeMode(!it)) }
             } else {
-                Text("Default result format", fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
+                Text("Default result format", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 6.dp))
                 SettingsSegments("Decimal", "Exact", state.defaultDecimal) { onAction(CalculatorAction.SetDefaultDecimal(it)) }
                 Text("Tap a result to switch formats. Symbolic answers stay exact.", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 5.dp))
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -1279,15 +1331,15 @@ private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDi
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 SettingRow("Complex mode", "Allow complex solutions", state.complexMode) { onAction(CalculatorAction.SetComplexMode(it)) }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text("Angle measure", fontSize = 14.sp, modifier = Modifier.padding(bottom = 6.dp))
+                Text("Angle measure", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 6.dp))
                 SettingsSegments("Radians", "Degrees", !state.degreeMode) { onAction(CalculatorAction.SetDegreeMode(!it)) }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Row(Modifier.fillMaxWidth().padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(value = precision, onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) precision = it },
-                        label = { Text("Precision digits", fontSize = 12.sp) }, supportingText = { Text("10–1000 digits", fontSize = 10.sp) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, textStyle = TextStyle(fontSize = 14.sp), modifier = Modifier.weight(1f))
+                        label = { Text("Precision digits") }, supportingText = { Text("10–1000 digits") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, shape = MaterialTheme.shapes.small, textStyle = interfaceTextStyle(14.sp), modifier = Modifier.weight(1f))
                     TextButton(onClick = { precision.toIntOrNull()?.takeIf { it in 10..1000 }?.let { onAction(CalculatorAction.SetPrecisionDigits(it)) } },
-                        enabled = (precision.toIntOrNull() ?: 0) in 10..1000) { Text("Apply", color = Blue) }
+                        enabled = (precision.toIntOrNull() ?: 0) in 10..1000, shape = MaterialTheme.shapes.small) { Text("Apply") }
                 }
             }
                 }
@@ -1298,20 +1350,22 @@ private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDi
 
 @Composable
 private fun SettingsCheck(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }, verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = checked, onCheckedChange = null, colors = CheckboxDefaults.colors(checkedColor = Blue))
-        Text(label, fontSize = 16.sp)
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(value = checked, role = Role.Checkbox, onValueChange = onChange).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = checked, onCheckedChange = null, modifier = Modifier.padding(end = 12.dp), colors = CheckboxDefaults.colors(checkedColor = Blue))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
 @Composable
 private fun SettingsSegments(first: String, second: String, firstSelected: Boolean, onSelect: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp)).border(1.dp, Color(0xFF999999), RoundedCornerShape(3.dp))) {
+    Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(DemosColors.Surface)
+        .border(1.dp, Border, MaterialTheme.shapes.small).padding(4.dp).selectableGroup()) {
         listOf(first to true, second to false).forEach { (label, selected) ->
             val active = firstSelected == selected
-            Box(Modifier.weight(1f).height(42.dp).background(if (active) Color(0xFF555555) else Color.White)
-                .clickable { onSelect(selected) }, contentAlignment = Alignment.Center) {
-                Text(label, color = if (active) Color.White else Color(0xFF222222), fontSize = 16.sp)
+            Box(Modifier.weight(1f).heightIn(min = 40.dp).clip(MaterialTheme.shapes.extraSmall)
+                .background(if (active) DemosColors.BlueSoft else Color.Transparent)
+                .selectable(selected = active, role = Role.RadioButton, onClick = { onSelect(selected) }).padding(horizontal = 8.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                Text(label, color = if (active) Blue else Muted, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
             }
         }
     }
@@ -1320,10 +1374,10 @@ private fun SettingsSegments(first: String, second: String, firstSelected: Boole
 @Composable
 private fun BoundFieldPair(axis: String, minimum: String, maximum: String, onMin: (String) -> Unit, onMax: (String) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(bottom = 5.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-        OutlinedTextField(value = minimum, onValueChange = onMin, label = { Text("$axis min", fontSize = 12.sp) }, placeholder = { Text("Auto", fontSize = 12.sp) },
-            singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), textStyle = TextStyle(fontSize = 14.sp), modifier = Modifier.weight(1f))
-        OutlinedTextField(value = maximum, onValueChange = onMax, label = { Text("$axis max", fontSize = 12.sp) }, placeholder = { Text("Auto", fontSize = 12.sp) },
-            singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), textStyle = TextStyle(fontSize = 14.sp), modifier = Modifier.weight(1f))
+        OutlinedTextField(value = minimum, onValueChange = onMin, label = { Text("$axis min") }, placeholder = { Text("Auto") },
+            singleLine = true, shape = MaterialTheme.shapes.small, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), textStyle = interfaceTextStyle(14.sp), modifier = Modifier.weight(1f))
+        OutlinedTextField(value = maximum, onValueChange = onMax, label = { Text("$axis max") }, placeholder = { Text("Auto") },
+            singleLine = true, shape = MaterialTheme.shapes.small, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), textStyle = interfaceTextStyle(14.sp), modifier = Modifier.weight(1f))
     }
 }
 
@@ -1337,9 +1391,9 @@ private fun SettingRow(title: String, detail: String, checked: Boolean, onChange
 
 @Composable
 private fun HelpSheet(onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = DemosColors.Paper) {
         Column(Modifier.fillMaxWidth().heightIn(max = 610.dp).verticalScroll(rememberScrollState()).padding(horizontal = 23.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-            Text("Calculator guide", fontSize = 23.sp)
+            Text("Calculator guide", style = MaterialTheme.typography.titleLarge)
             Text("Edit mathematics directly: tap a numerator, denominator, or exponent to place the cursor there. Division creates a fraction; use the arrow keys to move between slots or out of a fraction. Hold and drag to select. Type opening and closing parentheses yourself; typing a function name does not add parentheses. The keypad adapts to calculator, 2D, and 3D modes. Decimal results appear by default; choose Decimal or Exact in Settings. Tap a result to switch formats; long-press to copy it. Drag the small blue handle above the keypad up or down to adjust its height.", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
             Text("Symbolic mathematics is powered by Giac/Xcas and runs on your device. Use exact fractions and assumptions when you need symbolic results.", fontSize = 12.sp, color = Muted, lineHeight = 18.sp)
             listOf(
@@ -1355,28 +1409,29 @@ private fun HelpSheet(onDismiss: () -> Unit) {
                 "Fullscreen" to "Use the top menu to open calculator or graph fullscreen. Your choice is remembered when you reopen the app.\nCalculator fullscreen opens with the keypad ready for typing. Keyboard visibility is remembered when you reopen the app. Tap anywhere in an equation to place the cursor. Back hides the keypad, then returns to the split view.",
             ).forEach { (heading, examples) ->
                 Text(heading, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                Text(examples, fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 20.sp,
-                    modifier = Modifier.fillMaxWidth().background(Color(0xFFF5F5F5), RoundedCornerShape(4.dp)).padding(12.dp))
+                Text(examples, style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.fillMaxWidth().background(DemosColors.Surface, MaterialTheme.shapes.small).padding(12.dp))
             }
             Spacer(Modifier.height(15.dp))
         }
     }
 }
 
-private enum class IconKind { Folder, More, Wrench, Plus, Undo, Redo, Settings, Collapse, Expand, Delete, Backspace, Return, Speaker, Keyboard, Fullscreen, Export }
+private enum class IconKind { Folder, More, Wrench, Plus, Undo, Redo, Settings, Collapse, Expand, Delete, Backspace, Return, Speaker, Keyboard, Fullscreen, Export, ArrowLeft, ArrowRight }
 
 @Composable
-private fun ToolIcon(kind: IconKind, description: String, color: Color = Muted, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(48.dp).semantics { contentDescription = description }) {
-        CalcIcon(kind, color, Modifier.size(23.dp))
+private fun ToolIcon(kind: IconKind, description: String, color: Color = Muted, onClick: () -> Unit, enabled: Boolean = true) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(48.dp).semantics { contentDescription = description }) {
+        Box(Modifier.size(36.dp).clip(MaterialTheme.shapes.small).background(if (color == Blue) DemosColors.BlueSoft else Color.Transparent), contentAlignment = Alignment.Center) {
+            CalcIcon(kind, if (enabled) color else DemosColors.Disabled, Modifier.size(22.dp))
+        }
     }
 }
 
 @Composable
 private fun GraphTool(kind: IconKind, description: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(modifier.size(48.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xFFEEEEEE)).border(.6.dp, Border, RoundedCornerShape(5.dp))
-        .clickable(onClick = onClick).semantics { contentDescription = description }, contentAlignment = Alignment.Center) {
-        CalcIcon(kind, Muted, Modifier.size(20.dp))
+    GraphControl(description, modifier, onClick) {
+        CalcIcon(kind, Muted, Modifier.size(22.dp))
     }
 }
 
@@ -1385,14 +1440,14 @@ private fun CalcIcon(kind: IconKind, color: Color, modifier: Modifier) {
     Canvas(modifier) {
         val w = size.width
         val h = size.height
-        val stroke = Stroke(width = w * .08f, cap = StrokeCap.Round)
+        val stroke = Stroke(width = w * .08f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         fun line(x1: Float, y1: Float, x2: Float, y2: Float, width: Float = .08f) = drawLine(color, Offset(x1 * w, y1 * h), Offset(x2 * w, y2 * h), w * width, StrokeCap.Round)
-        fun path(points: List<Pair<Float, Float>>, close: Boolean = false, fill: Boolean = false) {
+        fun path(points: List<Pair<Float, Float>>, close: Boolean = false) {
             val p = Path().apply {
                 points.forEachIndexed { i, point -> if (i == 0) moveTo(point.first * w, point.second * h) else lineTo(point.first * w, point.second * h) }
                 if (close) close()
             }
-            if (fill) drawPath(p, color) else drawPath(p, color, style = stroke)
+            drawPath(p, color, style = stroke)
         }
         when (kind) {
             IconKind.Fullscreen -> {
@@ -1416,11 +1471,16 @@ private fun CalcIcon(kind: IconKind, color: Color, modifier: Modifier) {
                 path(listOf(.12f to .8f, .28f to .43f, .95f to .43f, .79f to .8f), true)
             }
             IconKind.More -> {
-                drawCircle(color, w * .44f, style = Stroke(w * .065f))
-                listOf(.3f, .5f, .7f).forEach { x -> drawCircle(color, w * .045f, Offset(w * x, h * .5f)) }
+                listOf(.2f, .5f, .8f).forEach { x -> drawCircle(color, w * .065f, Offset(w * x, h * .5f)) }
             }
-            IconKind.Plus -> { line(.2f, .5f, .8f, .5f, .13f); line(.5f, .2f, .5f, .8f, .13f) }
-            IconKind.Delete -> { line(.2f, .2f, .8f, .8f, .12f); line(.8f, .2f, .2f, .8f, .12f) }
+            IconKind.Plus -> { line(.2f, .5f, .8f, .5f); line(.5f, .2f, .5f, .8f) }
+            IconKind.Delete -> { line(.2f, .2f, .8f, .8f); line(.8f, .2f, .2f, .8f) }
+            IconKind.ArrowLeft, IconKind.ArrowRight -> {
+                val right = kind == IconKind.ArrowRight
+                val tip = if (right) .8f else .2f
+                line(.2f, .5f, .8f, .5f)
+                path(listOf(.5f to .2f, tip to .5f, .5f to .8f))
+            }
             IconKind.Collapse, IconKind.Expand -> {
                 val invert = kind == IconKind.Expand
                 val y: (Float) -> Float = { if (invert) 1f - it else it }
@@ -1429,10 +1489,13 @@ private fun CalcIcon(kind: IconKind, color: Color, modifier: Modifier) {
             }
             IconKind.Undo, IconKind.Redo -> {
                 val flip = kind == IconKind.Redo
-                fun x(v: Float) = (if (flip) 1f - v else v) * w
-                val p = Path().apply { moveTo(x(.15f), h * .54f); cubicTo(x(.35f), h * .17f, x(.66f), h * .15f, x(.9f), h * .49f); cubicTo(x(.60f), h * .30f, x(.39f), h * .37f, x(.28f), h * .60f) }
-                drawPath(p, color)
-                path(listOf((if (flip) .85f else .15f) to .27f, (if (flip) .85f else .15f) to .68f, (if (flip) .48f else .52f) to .68f), true, true)
+                fun x(v: Float) = if (flip) 1f - v else v
+                val p = Path().apply {
+                    moveTo(x(.84f) * w, h * .73f)
+                    cubicTo(x(.82f) * w, h * .28f, x(.45f) * w, h * .18f, x(.17f) * w, h * .53f)
+                }
+                drawPath(p, color, style = stroke)
+                path(listOf(x(.18f) to .22f, x(.17f) to .53f, x(.48f) to .52f))
             }
             IconKind.Settings -> {
                 val p = Path()
@@ -1443,35 +1506,29 @@ private fun CalcIcon(kind: IconKind, color: Color, modifier: Modifier) {
                     val point = Offset(w / 2 + kotlin.math.cos(angle).toFloat() * radius, h / 2 + kotlin.math.sin(angle).toFloat() * radius)
                     if (i == 0) p.moveTo(point.x, point.y) else p.lineTo(point.x, point.y)
                 }
-                p.close(); drawPath(p, color)
-                drawCircle(Color(0xFFF3F3F3), w * .17f)
-                drawCircle(color, w * .07f)
+                p.close(); drawPath(p, color, style = stroke)
+                drawCircle(color, w * .15f, style = stroke)
             }
             IconKind.Wrench -> {
-                line(.24f, .78f, .64f, .39f, .20f)
-                drawCircle(color, w * .25f, Offset(w * .67f, h * .31f))
-                path(listOf(.62f to .06f, .57f to .32f, .78f to .43f, .95f to .25f, 1f to .01f), true, true)
-                // The open jaw is cut out in the tool tile's background color.
-                val jaw = Path().apply { moveTo(w * .67f, 0f); lineTo(w, 0f); lineTo(w * .86f, h * .27f); lineTo(w * .64f, h * .31f); close() }
-                drawPath(jaw, Color(0xFFEEEEEE))
-                drawCircle(Color(0xFFEEEEEE), w * .04f, Offset(w * .24f, h * .78f))
+                path(listOf(.14f to .74f, .5f to .38f, .48f to .22f, .61f to .09f, .76f to .08f,
+                    .66f to .28f, .75f to .38f, .94f to .28f, .93f to .45f, .8f to .58f, .64f to .56f, .28f to .92f), close = true)
             }
             IconKind.Backspace -> {
-                path(listOf(.08f to .50f, .34f to .20f, .91f to .20f, .91f to .80f, .34f to .80f), true, true)
-                drawLine(Color(0xFFD0D0D0), Offset(w * .49f, h * .35f), Offset(w * .74f, h * .65f), w * .075f)
-                drawLine(Color(0xFFD0D0D0), Offset(w * .74f, h * .35f), Offset(w * .49f, h * .65f), w * .075f)
+                path(listOf(.08f to .50f, .34f to .20f, .91f to .20f, .91f to .80f, .34f to .80f), true)
+                line(.49f, .35f, .74f, .65f, .075f)
+                line(.74f, .35f, .49f, .65f, .075f)
             }
             IconKind.Return -> {
-                val p = Path().apply { moveTo(w * .88f, h * .27f); lineTo(w * .88f, h * .46f); quadraticTo(w * .88f, h * .68f, w * .65f, h * .68f); lineTo(w * .20f, h * .68f) }
-                drawPath(p, color, style = Stroke(w * .09f))
-                path(listOf(.32f to .53f, .15f to .68f, .32f to .83f), true, true)
+                val p = Path().apply { moveTo(w * .84f, h * .22f); lineTo(w * .84f, h * .42f); quadraticTo(w * .84f, h * .62f, w * .64f, h * .62f); lineTo(w * .18f, h * .62f) }
+                drawPath(p, color, style = stroke)
+                path(listOf(.34f to .46f, .18f to .62f, .34f to .78f))
             }
             IconKind.Speaker -> {
-                path(listOf(.08f to .35f, .28f to .35f, .5f to .15f, .5f to .85f, .28f to .65f, .08f to .65f), true, true)
+                path(listOf(.08f to .35f, .28f to .35f, .5f to .15f, .5f to .85f, .28f to .65f, .08f to .65f), close = true)
                 val p = Path().apply { moveTo(w * .65f, h * .32f); quadraticTo(w * .84f, h * .5f, w * .65f, h * .68f) }
-                drawPath(p, color, style = Stroke(w * .065f))
+                drawPath(p, color, style = stroke)
                 val outer = Path().apply { moveTo(w * .78f, h * .2f); quadraticTo(w * 1.08f, h * .5f, w * .78f, h * .8f) }
-                drawPath(outer, color, style = Stroke(w * .065f))
+                drawPath(outer, color, style = stroke)
             }
         }
     }

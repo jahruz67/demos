@@ -6,17 +6,16 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.demos.graphing.data.GraphImages
@@ -33,12 +32,14 @@ internal fun ImageWorksheet(row: ExpressionRow, number: Int, selected: Boolean, 
     val image = parseImageData(row.text) ?: return
     val context = LocalContext.current.applicationContext
     val bitmap by produceState<android.graphics.Bitmap?>(null, image.uri) { value = withContext(Dispatchers.IO) { GraphImages.decode(context, image.uri) } }
-    ItemFrame(number, selected, "▧", onSelect, onDelete) {
+    ItemFrame(number, selected, "image", onSelect, onDelete) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            bitmap?.let { Image(it.asImageBitmap(), image.name, Modifier.size(54.dp).clickable(onClick = onVisibility)) }
+            bitmap?.let { Image(it.asImageBitmap(), image.name, Modifier.size(54.dp).clip(MaterialTheme.shapes.small).clickable(onClick = onVisibility)) }
             Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                BasicTextField(image.name, { onChange(image.copy(name = it)) }, textStyle = TextStyle(fontSize = 16.sp), modifier = Modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) onSelect() })
-                Text(if (row.hidden) "Show image" else "Hide image", fontSize = 11.sp, color = Color(0xFF2D70DA), modifier = Modifier.padding(top = 7.dp).clickable(onClick = onVisibility))
+                BasicTextField(image.name, { onChange(image.copy(name = it)) }, singleLine = true, textStyle = interfaceTextStyle(16.sp).copy(color = DemosColors.Ink), modifier = Modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) onSelect() })
+                TextButton(onClick = onVisibility, shape = MaterialTheme.shapes.small, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+                    Text(if (row.hidden) "Show image" else "Hide image", style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
         if (selected) {
@@ -52,7 +53,7 @@ internal fun ImageWorksheet(row: ExpressionRow, number: Int, selected: Boolean, 
                 NumberSetting("Angle", image.angle.toString(), Modifier.weight(1f), onSelect) { it.toDoubleOrNull()?.takeIf(Double::isFinite)?.let { angle -> onChange(image.copy(angle = angle)) } }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Opacity", fontSize = 11.sp, color = Color.Gray)
+                Text("Opacity", fontSize = 11.sp, color = DemosColors.Muted)
                 Slider(image.opacity.toFloat(), { onChange(image.copy(opacity = it.toDouble())) }, modifier = Modifier.weight(1f).height(30.dp))
             }
         }
@@ -73,11 +74,13 @@ internal fun InferenceWorksheet(row: ExpressionRow, number: Int, state: Calculat
     val confidence = data.confidence.toDoubleOrNull() ?: .95
     val result = if (data.kind == "proportion") StatisticalInference.proportion(data.mean.toDoubleOrNull() ?: Double.NaN, n, data.nullValue.toDoubleOrNull() ?: .5, confidence, data.alternative)
         else StatisticalInference.mean(mean ?: Double.NaN, deviation ?: Double.NaN, n, data.nullValue.toDoubleOrNull() ?: 0.0, confidence, data.alternative)
-    ItemFrame(number, row.id == state.activeId, "∩", onSelect, onDelete) {
+    ItemFrame(number, row.id == state.activeId, "inference", onSelect, onDelete) {
         var kindMenu by remember { mutableStateOf(false) }
         Box {
-            Text((if (data.kind == "mean") "One-Sample t-Test" else "One-Proportion z-Test") + "  ▾", fontSize = 15.sp, modifier = Modifier.clickable { onSelect(); kindMenu = true }.padding(vertical = 8.dp))
-            DropdownMenu(kindMenu, { kindMenu = false }, modifier = Modifier.background(Color.White)) {
+            MenuControl(Modifier.fillMaxWidth(), onClick = { onSelect(); kindMenu = true }) {
+                Text(if (data.kind == "mean") "One-Sample t-Test" else "One-Proportion z-Test", style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            DemosDropdownMenu(kindMenu, { kindMenu = false }) {
                 DropdownMenuItem(text = { Text("One-Sample t-Test") }, onClick = { onChange(data.copy(kind = "mean", nullValue = "0")); kindMenu = false })
                 DropdownMenuItem(text = { Text("One-Proportion z-Test") }, onClick = { onChange(data.copy(kind = "proportion", nullValue = "0.5", tableId = null)); kindMenu = false })
             }
@@ -85,8 +88,11 @@ internal fun InferenceWorksheet(row: ExpressionRow, number: Int, state: Calculat
         if (data.kind == "mean") {
             var sourceMenu by remember { mutableStateOf(false) }
             Box {
-                Text((if (tableIndex < 0) "Summary statistics" else tables[tableIndex].second.header(data.column, tableIndex + 1)) + "  ▾", color = Color(0xFF666666), fontSize = 12.sp, modifier = Modifier.clickable { sourceMenu = true }.padding(vertical = 7.dp))
-                DropdownMenu(sourceMenu, { sourceMenu = false }, modifier = Modifier.background(Color.White)) {
+                MenuControl(Modifier.fillMaxWidth(), onClick = { sourceMenu = true }) {
+                    if (tableIndex < 0) Text("Summary statistics", style = MaterialTheme.typography.bodyMedium)
+                    else MathExpression(tables[tableIndex].second.header(data.column, tableIndex + 1), 18)
+                }
+                DemosDropdownMenu(sourceMenu, { sourceMenu = false }) {
                     DropdownMenuItem(text = { Text("Summary statistics") }, onClick = { onChange(data.copy(tableId = null)); sourceMenu = false })
                     tables.forEachIndexed { i, (id, table) -> repeat(table.columnCount) { c ->
                         DropdownMenuItem(text = { MathExpression(table.header(c, i + 1), 17) }, onClick = { onChange(data.copy(tableId = id, column = c)); sourceMenu = false })
@@ -98,18 +104,18 @@ internal fun InferenceWorksheet(row: ExpressionRow, number: Int, state: Calculat
             NumberSetting(if (data.kind == "mean") "Mean" else "Successes", data.mean, Modifier.weight(1f), onSelect) { onChange(data.copy(mean = it)) }
             if (data.kind == "mean") NumberSetting("Std. dev.", data.deviation, Modifier.weight(1f), onSelect) { onChange(data.copy(deviation = it)) }
             NumberSetting("n", data.count, Modifier.weight(1f), onSelect) { onChange(data.copy(count = it)) }
-        } else Text("n = $n, mean = ${number(mean ?: 0.0)}", color = Color.Gray, fontSize = 12.sp)
+        } else Text("n = $n, mean = ${number(mean ?: 0.0)}", color = DemosColors.Muted, fontSize = 12.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             NumberSetting("Null value", data.nullValue, Modifier.weight(1f), onSelect) { onChange(data.copy(nullValue = it)) }
             NumberSetting("Confidence", data.confidence, Modifier.weight(1f), onSelect) { onChange(data.copy(confidence = it)) }
             var alternatives by remember { mutableStateOf(false) }
             Box {
-                Text(data.alternative + " ▾", fontSize = 19.sp, modifier = Modifier.clickable { alternatives = true }.padding(5.dp))
-                DropdownMenu(alternatives, { alternatives = false }) { listOf("≠", "<", ">").forEach { a -> DropdownMenuItem(text = { Text(a) }, onClick = { onChange(data.copy(alternative = a)); alternatives = false }) } }
+                MenuControl(Modifier.width(72.dp), onClick = { alternatives = true }) { MathExpression(data.alternative, 18) }
+                DemosDropdownMenu(alternatives, { alternatives = false }) { listOf("≠", "<", ">").forEach { a -> DropdownMenuItem(text = { Text(a) }, onClick = { onChange(data.copy(alternative = a)); alternatives = false }) } }
             }
         }
         HorizontalDivider(Modifier.padding(vertical = 7.dp))
-        if (result == null) Text("Enter valid sample statistics to calculate.", color = Color.Gray, fontSize = 11.sp)
+        if (result == null) Text("Enter valid sample statistics to calculate.", color = DemosColors.Muted, fontSize = 11.sp)
         else {
             MathExpression("${if (result.degreesOfFreedom == null) "z" else "t"}=${number(result.statistic)}", 19)
             Text("p = ${number(result.probability)}" + (result.degreesOfFreedom?.let { "     df = $it" } ?: ""), fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
@@ -120,26 +126,24 @@ internal fun InferenceWorksheet(row: ExpressionRow, number: Int, state: Calculat
 
 @Composable
 private fun ItemFrame(number: Int, selected: Boolean, icon: String, onSelect: () -> Unit, onDelete: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).border(if (selected) 1.dp else .5.dp, if (selected) Color(0xFF2D70DA) else Color(0xFFD3D3D3))) {
-        Column(Modifier.width(34.dp).fillMaxHeight().background(if (selected) Color(0xFF2D70DA) else Color(0xFFEEEEEE)).clickable(onClick = onSelect)) {
-            Text("$number", fontSize = 10.sp, color = if (selected) Color.White else Color.Gray, modifier = Modifier.padding(2.dp))
-            Text(icon, fontSize = 24.sp, color = if (selected) Color.White else Color.Gray, modifier = Modifier.align(Alignment.CenterHorizontally))
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).border(if (selected) 1.dp else .5.dp, if (selected) DemosColors.Blue else DemosColors.Border)) {
+        Column(Modifier.width(34.dp).fillMaxHeight().background(if (selected) DemosColors.Blue else DemosColors.Surface).clickable(onClick = onSelect)) {
+            Text("$number", style = MaterialTheme.typography.labelSmall, color = if (selected) Color.White else DemosColors.Muted, modifier = Modifier.padding(start = 6.dp, top = 4.dp))
+            WorksheetItemIcon(icon, Modifier.align(Alignment.CenterHorizontally).size(24.dp), if (selected) Color.White else DemosColors.Muted)
         }
-        Box(Modifier.weight(1f)) {
-            Column(Modifier.fillMaxWidth().padding(start = 13.dp, top = 8.dp, end = 35.dp, bottom = 12.dp), content = content)
-            Text("×", color = Color.LightGray, fontSize = 25.sp, modifier = Modifier.align(Alignment.TopEnd).padding(7.dp).clickable(onClick = onDelete))
+        Column(Modifier.weight(1f).padding(start = 14.dp, top = 6.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(icon.replaceFirstChar { it.uppercaseChar() }, color = DemosColors.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                DismissControl("Delete item $number", onClick = onDelete)
+            }
+            content()
         }
     }
 }
 
 @Composable
 private fun NumberSetting(label: String, source: String, modifier: Modifier, onSelect: () -> Unit, onChange: (String) -> Unit) {
-    Column(modifier.padding(top = 8.dp)) {
-        Text(label, fontSize = 10.sp, color = Color.Gray)
-        BasicTextField(source, onChange, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), textStyle = TextStyle(fontSize = 15.sp),
-            modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp).onFocusChanged { if (it.isFocused) onSelect() })
-        HorizontalDivider(color = Color(0xFFCCCCCC))
-    }
+    CompactNumberField(source, onChange, modifier, label = label, onFocus = { if (it) onSelect() })
 }
 
 private fun number(value: Double) = java.lang.String.format(java.util.Locale.US, "%.6g", value)

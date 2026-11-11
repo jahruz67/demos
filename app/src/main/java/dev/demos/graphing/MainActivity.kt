@@ -24,15 +24,12 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.android.awaitFrame
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.core.content.FileProvider
@@ -46,6 +43,8 @@ import dev.demos.graphing.plot.PlotSettings
 import dev.demos.graphing.data.GraphImages
 import dev.demos.graphing.ui.CalculatorScreen
 import dev.demos.graphing.ui.CalculatorLayout
+import dev.demos.graphing.ui.DemosColors
+import dev.demos.graphing.ui.DemosTheme
 import dev.demos.graphing.ui.GraphExportFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -160,8 +159,8 @@ class MainActivity : ComponentActivity() {
                     else hide(WindowInsetsCompat.Type.systemBars())
                 }
             }
-            MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFF2D70D9), background = Color.White, surface = Color.White)) {
-                Box(Modifier.fillMaxSize().background(Color.Black).windowInsetsPadding(WindowInsets.safeDrawing)) {
+            DemosTheme {
+                Box(Modifier.fillMaxSize().background(DemosColors.Header).windowInsetsPadding(WindowInsets.safeDrawing)) {
                     CalculatorScreen(current, model::onAction, showGraphControls = !capturing, onOpenLibrary = { model.loadLibrary() }) { is3D, modifier ->
                         GraphPlot(
                             expressions = model.plotExpressions(current),

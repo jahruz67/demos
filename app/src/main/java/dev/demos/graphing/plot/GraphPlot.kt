@@ -5,7 +5,6 @@ import android.opengl.Matrix
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -24,6 +23,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
@@ -36,7 +37,9 @@ import dev.demos.graphing.data.GraphImages
 import dev.demos.graphing.ui.parseImageData
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
+import dev.demos.graphing.ui.DemosColors
+import dev.demos.graphing.ui.GraphControl
+import dev.demos.graphing.ui.interfaceTextStyle
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -193,15 +196,15 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                 }
             }
             if(showControls && settings.showAxes) Row(Modifier.align(Alignment.BottomStart).padding(10.dp)
-                .background(Color(0xEEFFFFFF),RoundedCornerShape(6.dp))
-                .border(1.dp,Color(0xFFD4D4D4),RoundedCornerShape(6.dp)).padding(horizontal=8.dp,vertical=5.dp)
+                .background(DemosColors.Paper.copy(alpha = .94f),RoundedCornerShape(8.dp))
+                .border(1.dp,DemosColors.Border,RoundedCornerShape(8.dp)).padding(horizontal=8.dp,vertical=5.dp)
                 .semantics { contentDescription="Axis colors: x red, y green, z blue" }, horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 graphAxisColors.forEachIndexed { index, color ->
-                    BasicText("xyz"[index].toString(),style=TextStyle(color=Color(color),fontSize=12.sp))
+                    BasicText("xyz"[index].toString(),style=interfaceTextStyle(12.sp).copy(color=Color(color)))
                 }
             }
-            if(showControls) BasicText("Drag to rotate · Pinch to zoom",Modifier.align(Alignment.BottomCenter).padding(8.dp),style=TextStyle(color=Color(0xFF777777),fontSize=10.sp))
-            inspectedPoint?.let {BasicText(it,Modifier.align(Alignment.TopStart).padding(8.dp).background(Color.White,RoundedCornerShape(5.dp)).border(1.dp,Color(0xFFD4D4D4),RoundedCornerShape(5.dp)).padding(8.dp),style=TextStyle(color=Color(0xFF333333),fontSize=16.sp))}
+            if(showControls) BasicText("Drag to rotate · Pinch to zoom",Modifier.align(Alignment.BottomCenter).padding(8.dp),style=interfaceTextStyle(11.sp).copy(color=DemosColors.Muted))
+            inspectedPoint?.let {BasicText(it,Modifier.align(Alignment.TopStart).padding(8.dp).background(DemosColors.Paper,RoundedCornerShape(8.dp)).border(1.dp,DemosColors.Border,RoundedCornerShape(8.dp)).padding(8.dp),style=interfaceTextStyle(16.sp).copy(color=DemosColors.Ink))}
         } else {
             Canvas(Modifier.fillMaxSize()
                 .pointerInput(Unit) {
@@ -400,8 +403,26 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     }
 }
 @Composable private fun PlotButton(label:String,description:String,onClick:()->Unit) {
-    Box(Modifier.size(48.dp).background(Color(0xFFF0F0F0),RoundedCornerShape(5.dp)).border(1.dp,Color(0xFFD4D4D4),RoundedCornerShape(5.dp)).semantics {contentDescription=description}.clickable(onClick=onClick),contentAlignment=Alignment.Center) {
-        BasicText(label,style=TextStyle(color=Color(0xFF626262),fontSize=25.sp))
+    GraphControl(description, onClick = onClick) {
+        Canvas(Modifier.size(22.dp)) {
+            val color = DemosColors.Muted
+            val width = 1.8.dp.toPx()
+            if (label == "⌂") {
+                val home = Path().apply {
+                    moveTo(size.width * .12f, size.height * .45f)
+                    lineTo(size.width * .5f, size.height * .12f)
+                    lineTo(size.width * .88f, size.height * .45f)
+                    moveTo(size.width * .24f, size.height * .38f)
+                    lineTo(size.width * .24f, size.height * .85f)
+                    lineTo(size.width * .76f, size.height * .85f)
+                    lineTo(size.width * .76f, size.height * .38f)
+                }
+                drawPath(home, color, style = Stroke(width, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            } else {
+                drawLine(color, Offset(size.width * .18f, size.height * .5f), Offset(size.width * .82f, size.height * .5f), width, StrokeCap.Round)
+                if (label == "+") drawLine(color, Offset(size.width * .5f, size.height * .18f), Offset(size.width * .5f, size.height * .82f), width, StrokeCap.Round)
+            }
+        }
     }
 }
 private fun niceStep(target:Double):Double {

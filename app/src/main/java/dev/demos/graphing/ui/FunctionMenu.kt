@@ -4,15 +4,14 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -77,10 +76,10 @@ internal fun FunctionMenuKey(modifier: Modifier = Modifier, onTemplate: (String,
     val spaceAboveKeypad = with(density) { (keypadTop - margin * 2).coerceAtLeast(0).toDp() }
     val menuHeight = minOf(360.dp, configuration.screenHeightDp.dp * .45f,
         (spaceAboveKeypad - 7.dp).coerceAtLeast(0.dp))
-    val border = Color(0xFFD3D3D3)
+    val border = DemosColors.Border
 
     Box(modifier.fillMaxHeight()) {
-        KeyTile("funcs", Modifier.fillMaxSize(), gray = true) { expanded = !expanded }
+        KeyTile("funcs", Modifier.fillMaxSize(), gray = true, active = expanded) { expanded = !expanded }
         if (expanded) Popup(
             popupPositionProvider = position,
             onDismissRequest = { expanded = false },
@@ -89,13 +88,13 @@ internal fun FunctionMenuKey(modifier: Modifier = Modifier, onTemplate: (String,
             Box(Modifier.width(menuWidth)) {
                 Surface(
                     modifier = Modifier.padding(bottom = 7.dp),
-                    shape = RoundedCornerShape(4.dp), color = Color.White,
+                    shape = MaterialTheme.shapes.medium, color = DemosColors.Paper,
                     border = BorderStroke(1.dp, border), shadowElevation = 5.dp,
                 ) {
-                    Column(Modifier.heightIn(max = menuHeight).verticalScroll(scrollState).padding(10.dp)) {
+                    Column(Modifier.heightIn(max = menuHeight).verticalScroll(scrollState).padding(12.dp)) {
                         functionSections.forEachIndexed { index, (title, functions) ->
                             if (index > 0) Spacer(Modifier.height(18.dp))
-                            Text(title, color = Color(0xFF777777), fontSize = 11.sp,
+                            Text(title, color = DemosColors.Muted, style = MaterialTheme.typography.labelSmall,
                                 modifier = Modifier.padding(bottom = 7.dp))
                             functions.chunked(3).forEach { row ->
                                 Row(Modifier.fillMaxWidth().height(36.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -115,7 +114,7 @@ internal fun FunctionMenuKey(modifier: Modifier = Modifier, onTemplate: (String,
                 Canvas(Modifier.align(Alignment.BottomStart)
                     .offset { IntOffset(position.arrowCenter - margin, 0) }.size(16.dp, 8.dp)) {
                     val tip = Offset(size.width / 2, size.height)
-                    drawPath(Path().apply { moveTo(0f, 0f); lineTo(tip.x, tip.y); lineTo(size.width, 0f); close() }, Color.White)
+                    drawPath(Path().apply { moveTo(0f, 0f); lineTo(tip.x, tip.y); lineTo(size.width, 0f); close() }, DemosColors.Paper)
                     drawLine(border, Offset.Zero, tip, 1.dp.toPx())
                     drawLine(border, tip, Offset(size.width, 0f), 1.dp.toPx())
                 }

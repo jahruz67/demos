@@ -1,3 +1,5 @@
 <resources>
+    <color name="app_chrome">#202B3A</color>
+    <color name="calculator_accent">#2D70DA</color>
     <color name="startup_background">#101B30</color>
 </resources>

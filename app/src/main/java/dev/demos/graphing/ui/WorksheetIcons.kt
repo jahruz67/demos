@@ -1,6 +1,8 @@
 package dev.demos.graphing.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Alignment
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -9,25 +11,30 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-internal fun WorksheetItemIcon(kind: String, modifier: Modifier = Modifier) {
-    val color = Color(0xFF808080)
+internal fun WorksheetItemIcon(kind: String, modifier: Modifier = Modifier, color: Color = DemosColors.Muted) {
     if (kind == "expression") {
-        Text("ƒ(x)", color = color, fontSize = 18.sp, fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, modifier = modifier)
-        return
-    }
-    if (kind == "note") {
-        Text("❝❞", color = color, fontSize = 23.sp, fontFamily = FontFamily.Serif, modifier = modifier)
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text("ƒx", color = color, style = mathTextStyle(18.sp).copy(fontStyle = FontStyle.Italic))
+        }
         return
     }
     Canvas(modifier) {
         val w = size.width; val h = size.height; val stroke = Stroke(1.4.dp.toPx())
         when (kind) {
+            "note" -> {
+                for (x in listOf(.25f, .65f)) {
+                    drawCircle(color, w * .13f, Offset(w * x, h * .35f))
+                    drawPath(Path().apply {
+                        moveTo(w * (x + .1f), h * .38f)
+                        cubicTo(w * (x + .1f), h * .5f, w * (x + .03f), h * .65f, w * (x - .09f), h * .7f)
+                    }, color, style = stroke)
+                }
+            }
             "table" -> {
                 drawRect(color, Offset(w * .1f, h * .08f), Size(w * .8f, h * .84f), style = stroke)
                 drawRect(color, Offset(w * .1f, h * .08f), Size(w * .8f, h * .2f))
