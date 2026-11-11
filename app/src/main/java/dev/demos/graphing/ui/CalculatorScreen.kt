@@ -1171,6 +1171,7 @@ private fun LibrarySheet(graphs: List<SavedGraph>, onDismiss: () -> Unit, onActi
 @Composable
 private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDismiss: () -> Unit, onAction: (CalculatorAction) -> Unit) {
     val activeBounds = if (state.is3D) state.bounds3D else state.bounds
+    val appearance = if (state.is3D) state.appearance3D else state.appearance2D
     val ranges = remember(state.is3D, activeBounds) {
         with(activeBounds) { mutableStateListOf(xMin?.toString().orEmpty(), xMax?.toString().orEmpty(), yMin?.toString().orEmpty(), yMax?.toString().orEmpty(),
             zMin?.toString().orEmpty(), zMax?.toString().orEmpty(), tMin.toString(), tMax.toString(), uMin.toString(), uMax.toString(), vMin.toString(), vMax.toString()) }
@@ -1192,8 +1193,30 @@ private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDi
             }
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
             if (graphSettings) {
+            if (state.is3D) {
+                Text("Perspective", fontSize = 16.sp)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Orthographic", fontSize = 11.sp, color = Muted)
+                    Slider(appearance.perspective, { onAction(CalculatorAction.SetAppearance(appearance.copy(perspective = it))) },
+                        modifier = Modifier.weight(1f), valueRange = 0f..1f)
+                    Text("Perspective", fontSize = 11.sp, color = Muted)
+                }
+            }
             SettingsCheck(if (state.is3D) "XY plane grid" else "Grid", if (state.is3D) state.showGrid3D else state.showGrid) { onAction(CalculatorAction.SetGrid(it)) }
-            SettingsCheck(if (state.is3D) "3D axes and box" else "Axes and numbers", if (state.is3D) state.showAxes3D else state.showAxes) { onAction(CalculatorAction.SetAxes(it)) }
+            SettingsCheck(if (state.is3D) "3D axes and box" else "Axes", if (state.is3D) state.showAxes3D else state.showAxes) { onAction(CalculatorAction.SetAxes(it)) }
+            SettingsCheck("Axis numbers", appearance.numbers) { onAction(CalculatorAction.SetAppearance(appearance.copy(numbers = it))) }
+            SettingsCheck("Axis labels", appearance.labels) { onAction(CalculatorAction.SetAppearance(appearance.copy(labels = it))) }
+            if (appearance.labels) repeat(if (state.is3D) 3 else 2) { axis ->
+                val label = listOf(appearance.xLabel, appearance.yLabel, appearance.zLabel)[axis]
+                OutlinedTextField(label, { text ->
+                    onAction(CalculatorAction.SetAppearance(when (axis) {
+                        0 -> appearance.copy(xLabel = text)
+                        1 -> appearance.copy(yLabel = text)
+                        else -> appearance.copy(zLabel = text)
+                    }))
+                }, label = { Text("${"XYZ"[axis]}-axis label") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 5.dp))
+            }
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
             if (state.is3D) {
                 Text("${if (showBounds) "▾" else "▸"} All bounds", modifier = Modifier.fillMaxWidth().clickable { showBounds = !showBounds }.padding(vertical = 8.dp), fontSize = 16.sp)
@@ -1215,7 +1238,9 @@ private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDi
                     val malformed = ranges.indices.any { ranges[it].isNotBlank() && (values[it] == null || values[it]?.isFinite() != true) }
                     val missing = (0..2).any { (values[it * 2] == null) != (values[it * 2 + 1] == null) } || (6..11).any { values[it] == null }
                     val unordered = (0..5).any { pair -> val a = values[pair * 2]; val b = values[pair * 2 + 1]; a != null && b != null && a >= b }
-                    if (malformed || missing || unordered) boundsError = "Enter finite minimum and maximum values, with minimum less than maximum."
+                    val nonpositive = !state.is3D && ((appearance.logX && values[0] != null && values[0]!! <= 0.0) || (appearance.logY && values[2] != null && values[2]!! <= 0.0))
+                    if (nonpositive) boundsError = "Logarithmic axes require positive bounds."
+                    else if (malformed || missing || unordered) boundsError = "Enter finite minimum and maximum values, with minimum less than maximum."
                     else {
                         onAction(CalculatorAction.SetBounds(GraphBounds(values[0], values[1], values[2], values[3], values[4], values[5],
                             values[6]!!, values[7]!!, values[8]!!, values[9]!!, values[10]!!, values[11]!!)))
@@ -1227,6 +1252,13 @@ private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDi
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
             Text("${if (showMore) "▾" else "▸"} More options", modifier = Modifier.fillMaxWidth().clickable { showMore = !showMore; if (showMore) showBounds = true }.padding(vertical = 8.dp), fontSize = 16.sp)
             if (showMore) {
+                if (!state.is3D) {
+                    Text("X-axis scale", fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
+                    SettingsSegments("Linear", "Logarithmic", !appearance.logX) { onAction(CalculatorAction.SetAppearance(appearance.copy(logX = !it))) }
+                    Text("Y-axis scale", fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
+                    SettingsSegments("Linear", "Logarithmic", !appearance.logY) { onAction(CalculatorAction.SetAppearance(appearance.copy(logY = !it))) }
+                    Text("Logarithmic axes display positive values in powers of 10.", fontSize = 11.sp, color = Muted)
+                }
                 Text("Parametric ranges", fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
                 repeat(3) { parameter ->
                     val index = 6 + parameter * 2

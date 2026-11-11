@@ -42,6 +42,7 @@ internal class GraphSurfaceView(context:Context,camera:GraphCameraState=GraphCam
     fun update(meshes:List<Mesh3D>,settings:PlotSettings,reset:Int) {
         if(lastMeshes!==meshes) {lastMeshes=meshes;graphRenderer.setMeshes(meshes)}
         graphRenderer.axes=settings.showAxes;graphRenderer.grid=settings.showGrid
+        graphRenderer.perspective=settings.appearance.perspective
         val bounds=listOf(settings.xMin,settings.xMax,settings.yMin,settings.yMax,settings.zMin,settings.zMax)
         if(reset!=lastReset || graphRenderer.configuredBounds!=bounds) {lastReset=reset;graphRenderer.fitBounds(settings,bounds)}
         requestRender()
@@ -125,6 +126,7 @@ private class SurfaceRenderer(private val camera:GraphCameraState, private val o
     val configuredBounds get()=camera.configuredBounds
     @Volatile var axes=true
     @Volatile var grid=true
+    @Volatile var perspective=1f
     @Volatile private var pending:List<Mesh3D>?=emptyList()
     @Volatile private var inspectionMeshes:List<Mesh3D> = emptyList()
     private var buffered=emptyList<BufferedMesh>()
@@ -213,12 +215,23 @@ private class SurfaceRenderer(private val camera:GraphCameraState, private val o
         val bounds=graphBounds
         val projectionAspect=bounds?.let {it.reference.width/it.reference.height} ?: aspect
         Matrix.perspectiveM(projection,0,42f,projectionAspect,(distance/10000).coerceAtLeast(0.000001f),distance*30+100)
+        val blend=perspective.coerceIn(0f,1f)
+        if(blend<1f) {
+            val ortho=FloatArray(16)
+            val halfHeight=distance*tan(21f*PI.toFloat()/180f)
+            Matrix.orthoM(ortho,0,-halfHeight*projectionAspect,halfHeight*projectionAspect,-halfHeight,halfHeight,
+                (distance/10000).coerceAtLeast(0.000001f),distance*30+100)
+            for(i in projection.indices) projection[i]=projection[i]*blend+ortho[i]*distance*(1f-blend)
+        }
         if(bounds!=null) {
             val reference=bounds.reference;val current=bounds.current
-            projection[0]*=reference.width/current.width
-            projection[5]*=reference.height/current.height
-            projection[8]=-2f*(reference.center.x-current.center.x)/current.width
-            projection[9]=2f*(reference.center.y-current.center.y)/current.height
+            val dx=2f*(reference.center.x-current.center.x)/current.width
+            val dy=-2f*(reference.center.y-current.center.y)/current.height
+            for(column in 0..3) {
+                val i=column*4
+                projection[i]=projection[i]*reference.width/current.width+dx*projection[i+3]
+                projection[i+1]=projection[i+1]*reference.height/current.height+dy*projection[i+3]
+            }
         }
         Matrix.setLookAtM(view,0,panX+distance*cos(el)*sin(az),panY-distance*cos(el)*cos(az),panZ+distance*sin(el),panX,panY,panZ,0f,0f,1f)
         val mvp=FloatArray(16);Matrix.multiplyMM(mvp,0,projection,0,view,0);latestMvp=mvp

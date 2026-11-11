@@ -296,6 +296,21 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             is CalculatorAction.SetBounds -> {
                 rememberUndo(); _state.value = if (_state.value.is3D) _state.value.copy(bounds3D = action.bounds, dirty = true) else _state.value.copy(bounds = action.bounds, dirty = true); changed(evaluate = false)
             }
+            is CalculatorAction.SetAppearance -> {
+                if (!action.appearance.perspective.isFinite()) return
+                val appearance = action.appearance.copy(perspective = action.appearance.perspective.coerceIn(0f, 1f))
+                rememberUndo()
+                _state.value = if (_state.value.is3D) _state.value.copy(appearance3D = appearance, dirty = true)
+                    else {
+                        val bounds = _state.value.bounds
+                        val resetX = appearance.logX && (bounds.xMin?.let { it <= 0.0 } == true || bounds.xMax?.let { it <= 0.0 } == true)
+                        val resetY = appearance.logY && (bounds.yMin?.let { it <= 0.0 } == true || bounds.yMax?.let { it <= 0.0 } == true)
+                        _state.value.copy(appearance2D = appearance, dirty = true, bounds = bounds.copy(
+                            xMin = if (resetX) null else bounds.xMin, xMax = if (resetX) null else bounds.xMax,
+                            yMin = if (resetY) null else bounds.yMin, yMax = if (resetY) null else bounds.yMax))
+                    }
+                changed(evaluate = false)
+            }
             is CalculatorAction.SetPrecisionDigits -> {
                 rememberUndo(); _state.value = _state.value.copy(precisionDigits = action.digits.coerceIn(10, 1000), dirty = true); changed()
             }
@@ -594,6 +609,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         is3D = _state.value.is3D, degreeMode = _state.value.degreeMode,
         showGrid = _state.value.showGrid, showAxes = _state.value.showAxes,
         showGrid3D = _state.value.showGrid3D, showAxes3D = _state.value.showAxes3D,
+        appearance2D = _state.value.appearance2D, appearance3D = _state.value.appearance3D,
         parameters = mapOf("C" to integrationConstant),
         precisionDigits = _state.value.precisionDigits,
         complexMode = _state.value.complexMode,
@@ -618,6 +634,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             is3D = doc.is3D, degreeMode = doc.degreeMode, showGrid = doc.showGrid, showAxes = doc.showAxes,
             showGrid3D = doc.showGrid3D ?: if (doc.is3D) doc.showGrid else true,
             showAxes3D = doc.showAxes3D ?: if (doc.is3D) doc.showAxes else true,
+            appearance2D = doc.appearance2D, appearance3D = doc.appearance3D,
             precisionDigits = doc.precisionDigits, complexMode = doc.complexMode,
             bounds = with(doc.viewBounds) { GraphBounds(get("xMin"), get("xMax"), get("yMin"), get("yMax"), get("zMin"), get("zMax"), get("tMin") ?: -10.0, get("tMax") ?: 10.0, get("uMin") ?: -5.0, get("uMax") ?: 5.0, get("vMin") ?: -5.0, get("vMax") ?: 5.0) },
             bounds3D = with(doc.viewBounds3D ?: if (doc.is3D) doc.viewBounds else emptyMap()) { GraphBounds(get("xMin"), get("xMax"), get("yMin"), get("yMax"), get("zMin"), get("zMax"), get("tMin") ?: -10.0, get("tMax") ?: 10.0, get("uMin") ?: -5.0, get("uMax") ?: 5.0, get("vMin") ?: -5.0, get("vMax") ?: 5.0) },

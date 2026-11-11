@@ -170,6 +170,7 @@ class MainActivity : ComponentActivity() {
                             settings = PlotSettings(
                                 showAxes = if (is3D) current.showAxes3D else current.showAxes,
                                 showGrid = if (is3D) current.showGrid3D else current.showGrid,
+                                appearance = if (is3D) current.appearance3D else current.appearance2D,
                                 radians = !current.degreeMode,
                                 parameters = model.plotParameters(current),
                                 xMin = (if (is3D) current.bounds3D else current.bounds).xMin, xMax = (if (is3D) current.bounds3D else current.bounds).xMax,

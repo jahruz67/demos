@@ -12,6 +12,11 @@ data class Mesh3D(val color:Int,val vertices:FloatArray,val primitive:Int=TRIANG
 object PlotGeometry {
     fun sample2D(program:PlotProgram,view:Viewport,samples:Int=800,cancelled:()->Boolean={false}):Geometry2D {
         val strokes=ArrayList<PlotStroke>();val fills=ArrayList<PlotFill>();val c=program.context
+        val appearance=program.settings.appearance
+        fun realX(x:Double)=axisValue(x,appearance.logX)
+        fun realY(y:Double)=axisValue(y,appearance.logY)
+        fun plotX(x:Double)=axisCoordinate(x,appearance.logX)
+        fun plotY(y:Double)=axisCoordinate(y,appearance.logY)
         for(relation in program.relations) {
             if(cancelled()) break
             val node=relation.expressions[0]
@@ -26,16 +31,16 @@ object PlotGeometry {
                     for(i in 0..samples) {
                         if(i%64==0 && cancelled()) return Geometry2D(strokes,fills)
                         val t=start+(end-start)*i/samples
-                        c.x=t;c.y=t;c.t=t
+                        c.x=realX(t);c.y=realY(t);c.t=t
                         val result=node.evaluate(c)
-                        val x=when(relation.kind) {PlotKind.X_FUNCTION -> result;PlotKind.POLAR -> result*cos(t);PlotKind.PARAMETRIC -> result;else -> t}
-                        val y=when(relation.kind) {PlotKind.X_FUNCTION -> t;PlotKind.POLAR -> result*sin(t);PlotKind.PARAMETRIC -> relation.expressions[1].evaluate(c);else -> result}
+                        val x=when(relation.kind) {PlotKind.X_FUNCTION -> plotX(result);PlotKind.POLAR -> plotX(result*cos(t));PlotKind.PARAMETRIC -> plotX(result);else -> t}
+                        val y=when(relation.kind) {PlotKind.X_FUNCTION -> t;PlotKind.POLAR -> plotY(result*sin(t));PlotKind.PARAMETRIC -> plotY(relation.expressions[1].evaluate(c));else -> plotY(result)}
                         var broken=!x.isFinite() || !y.isFinite()
                         if(!broken && previousX.isFinite()) {
                             if(abs(x-previousX)>view.width*0.5 || abs(y-previousY)>view.height*0.5) broken=true
                             else if(relation.kind==PlotKind.Y_FUNCTION || relation.kind==PlotKind.X_FUNCTION) {
-                                c.x=(previousT+t)/2;c.y=c.x
-                                val middle=node.evaluate(c)
+                                c.x=realX((previousT+t)/2);c.y=realY((previousT+t)/2)
+                                val middle=if(relation.kind==PlotKind.X_FUNCTION) plotX(node.evaluate(c)) else plotY(node.evaluate(c))
                                 val expected=if(relation.kind==PlotKind.X_FUNCTION) (x+previousX)/2 else (y+previousY)/2
                                 val span=if(relation.kind==PlotKind.X_FUNCTION) view.width else view.height
                                 if(!middle.isFinite() || abs(middle-expected)>span*0.2) broken=true
@@ -52,7 +57,10 @@ object PlotGeometry {
                     }
                 }
                 PlotKind.POINT -> {
-                    val values=relation.expressions.map {it.evaluate(c)}
+                    val values=relation.expressions.mapIndexed { index, expression ->
+                        val value=expression.evaluate(c)
+                        if(index==0) plotX(value) else plotY(value)
+                    }
                     if(values.take(2).all {it.isFinite()}) strokes.add(PlotStroke(relation.id,relation.color,floatArrayOf(values[0].toFloat(),values[1].toFloat()),true))
                 }
                 PlotKind.IMPLICIT -> {
@@ -60,8 +68,8 @@ object PlotGeometry {
                     val values=DoubleArray((nx+1)*(ny+1))
                     for(j in 0..ny) {
                         if(cancelled()) return Geometry2D(strokes,fills)
-                        c.y=view.bottom+view.height*j/ny
-                        for(i in 0..nx) {c.x=view.left+view.width*i/nx;values[j*(nx+1)+i]=node.evaluate(c)}
+                        c.y=realY(view.bottom+view.height*j/ny)
+                        for(i in 0..nx) {c.x=realX(view.left+view.width*i/nx);values[j*(nx+1)+i]=node.evaluate(c)}
                     }
                     for(j in 0 until ny) for(i in 0 until nx) {
                         val x0=view.left+view.width*i/nx;val x1=x0+view.width/nx
@@ -85,7 +93,14 @@ object PlotGeometry {
                 PlotKind.Z_SURFACE,PlotKind.XY_FIELD,PlotKind.PARAMETRIC_SURFACE -> Unit
             }
         }
-        return Geometry2D(strokes,fills,PointOfInterestAnalyzer.analyze(program,view,cancelled=cancelled))
+        val x0=realX(view.left);val x1=realX(view.right);val y0=realY(view.bottom);val y1=realY(view.top)
+        val realView=Viewport((x0+x1)/2,(y0+y1)/2,x1-x0,y1-y0)
+        val interests=if(listOf(x0,x1,y0,y1).all {it.isFinite()} && realView.width>0 && realView.height>0)
+            PointOfInterestAnalyzer.analyze(program,realView,cancelled=cancelled).mapNotNull {
+                val x=plotX(it.x);val y=plotY(it.y)
+                if(x.isFinite() && y.isFinite()) it.copy(x=x,y=y) else null
+            } else emptyList()
+        return Geometry2D(strokes,fills,interests)
     }
     private fun inequality(value:Double,op:String)=if(op.startsWith('<') || op=="≤") value<=0 else value>=0
     private fun sampleInequality(program:PlotProgram,r:PlotRelation,v:Viewport,fills:MutableList<PlotFill>,cancelled:()->Boolean) {
@@ -94,9 +109,12 @@ object PlotGeometry {
             if(cancelled()) return
             val a=if(r.kind==PlotKind.Y_FUNCTION) v.left+v.width*i/count else v.bottom+v.height*i/count
             val b=a+(if(r.kind==PlotKind.Y_FUNCTION) v.width else v.height)/count
-            c.x=(a+b)/2;c.y=c.x
-            val f=r.expressions[0].evaluate(c)
-            if(!f.isFinite()) continue
+            c.x=axisValue((a+b)/2,program.settings.appearance.logX)
+            c.y=axisValue((a+b)/2,program.settings.appearance.logY)
+            val raw=r.expressions[0].evaluate(c)
+            if(!raw.isFinite()) continue
+            val logarithmic=if(r.kind==PlotKind.Y_FUNCTION) program.settings.appearance.logY else program.settings.appearance.logX
+            val f=if(logarithmic && raw<=0.0) Double.NEGATIVE_INFINITY else axisCoordinate(raw,logarithmic)
             val lower=r.inequality!!.startsWith('<') || r.inequality=="≤"
             val coords=if(r.kind==PlotKind.Y_FUNCTION) {
                 val y0=if(lower) v.bottom else f.coerceIn(v.bottom,v.top)

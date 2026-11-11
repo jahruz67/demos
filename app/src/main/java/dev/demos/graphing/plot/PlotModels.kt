@@ -20,6 +20,7 @@ data class PlotSettings(
     val uMax:Double=5.0,
     val vMin:Double=-5.0,
     val vMax:Double=5.0,
+    val appearance: GraphAppearance = GraphAppearance(),
 )
 data class Viewport(val centerX: Double = 0.0, val centerY: Double = 0.0, val width: Double = 20.0, val height: Double = 16.8) {
     val left get() = centerX-width/2

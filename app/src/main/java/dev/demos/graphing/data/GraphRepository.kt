@@ -31,6 +31,8 @@ data class GraphDocument(
     val showGrid3D: Boolean? = null,
     val showAxes3D: Boolean? = null,
     val viewBounds3D: Map<String, Double>? = null,
+    val appearance2D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(),
+    val appearance3D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(),
 )
 
 class GraphRepository(context: Context) {

@@ -7,12 +7,13 @@ import kotlin.math.abs
 internal enum class PlotZoomAxes { Both, X, Y }
 
 /** Choose once when a pinch begins. Both fingers must be near the same visible axis. */
-internal fun plotZoomAxes(points: List<Offset>, view: Viewport, size: IntSize, tolerance: Float): PlotZoomAxes {
+internal fun plotZoomAxes(points: List<Offset>, view: Viewport, size: IntSize, tolerance: Float,
+    horizontal: Double = 0.0, vertical: Double = 0.0): PlotZoomAxes {
     if (points.size < 2 || size.width <= 0 || size.height <= 0) return PlotZoomAxes.Both
-    val axisX = (-view.left / view.width * size.width).toFloat()
-    val axisY = (view.top / view.height * size.height).toFloat()
-    val nearX = 0.0 in view.bottom..view.top && points.all { abs(it.y - axisY) <= tolerance }
-    val nearY = 0.0 in view.left..view.right && points.all { abs(it.x - axisX) <= tolerance }
+    val axisX = ((vertical-view.left) / view.width * size.width).toFloat()
+    val axisY = ((view.top-horizontal) / view.height * size.height).toFloat()
+    val nearX = horizontal in view.bottom..view.top && points.all { abs(it.y - axisY) <= tolerance }
+    val nearY = vertical in view.left..view.right && points.all { abs(it.x - axisX) <= tolerance }
     return when {
         nearX && !nearY -> PlotZoomAxes.X
         nearY && !nearX -> PlotZoomAxes.Y

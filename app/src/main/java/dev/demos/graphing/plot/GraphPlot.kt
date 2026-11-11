@@ -85,14 +85,20 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     var inspectedPoint by remember {mutableStateOf<String?>(null)}
     var resetCounter by remember {mutableIntStateOf(0)}
     fun reset2D() {
-        val xb=validBounds(settings.xMin,settings.xMax)
-        val yb=validBounds(settings.yMin,settings.yMax)
+        trace=null
+        fun scaledBounds(low:Double?,high:Double?,log:Boolean):Pair<Double,Double>? {
+            val bounds=validBounds(low,high)
+            if(!log) return bounds
+            return if(bounds!=null && bounds.first>0.0) log10(bounds.first) to log10(bounds.second) else -1.0 to 3.0
+        }
+        val xb=scaledBounds(settings.xMin,settings.xMax,settings.appearance.logX)
+        val yb=scaledBounds(settings.yMin,settings.yMax,settings.appearance.logY)
         center=Offset((xb?.let {(it.first+it.second)/2}?:0.0).toFloat(),(yb?.let {(it.first+it.second)/2}?:0.0).toFloat())
         viewWidth=xb?.let {it.second-it.first}?:20.0
         viewHeightOverride=yb?.let {it.second-it.first}
     }
-    LaunchedEffect(settings.xMin,settings.xMax,settings.yMin,settings.yMax) {
-        val bounds=listOf(settings.xMin,settings.xMax,settings.yMin,settings.yMax)
+    LaunchedEffect(settings.xMin,settings.xMax,settings.yMin,settings.yMax,settings.appearance.logX,settings.appearance.logY) {
+        val bounds=listOf(settings.xMin,settings.xMax,settings.yMin,settings.yMax,if(settings.appearance.logX) 1.0 else 0.0,if(settings.appearance.logY) 1.0 else 0.0)
         if(appliedBounds!=bounds) {reset2D();appliedBounds=bounds}
     }
     val program by produceState<PlotProgram?>(null,expressions,settings) {
@@ -120,6 +126,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     val latestGeometry by rememberUpdatedState(geometry)
     val latestView by rememberUpdatedState(view)
     val latestShowAxes by rememberUpdatedState(settings.showAxes)
+    val latestAppearance by rememberUpdatedState(settings.appearance)
     val density=LocalDensity.current.density
     val labelPaint=remember {Paint(Paint.ANTI_ALIAS_FLAG).apply {color=android.graphics.Color.BLACK}}
     Box(modifier.background(Color.White).onGloballyPositioned { coordinates ->
@@ -165,12 +172,16 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                     if(point[3]<=0f) return
                     val px=(point[0]/point[3]+1f)*size.width/2f
                     val py=(1f-point[1]/point[3])*size.height/2f
-                    if(px in 0f..size.width && py in 0f..size.height) drawContext.canvas.nativeCanvas.drawText(text,px+4f*density,py-4f*density,paint)
+                    if(px in 0f..size.width.toFloat() && py in 0f..size.height.toFloat()) drawContext.canvas.nativeCanvas.drawText(text,px+4f*density,py-4f*density,paint)
                 }
                 val ranges=listOf((settings.xMin ?: -5.0) to (settings.xMax ?: 5.0),
                     (settings.yMin ?: -5.0) to (settings.yMax ?: 5.0), (settings.zMin ?: -5.0) to (settings.zMax ?: 5.0))
-                label("x",ranges[0].second.toFloat(),0f,0f);label("y",0f,ranges[1].second.toFloat(),0f);label("z",0f,0f,ranges[2].second.toFloat())
-                ranges.forEachIndexed { axis, range ->
+                if(settings.appearance.labels) {
+                    label(settings.appearance.xLabel,ranges[0].second.toFloat(),0f,0f)
+                    label(settings.appearance.yLabel,0f,ranges[1].second.toFloat(),0f)
+                    label(settings.appearance.zLabel,0f,0f,ranges[2].second.toFloat())
+                }
+                if(settings.appearance.numbers) ranges.forEachIndexed { axis, range ->
                     for(i in 1..4) {
                         val value=range.first+(range.second-range.first)*i/5
                         if(abs(value)>1e-9) {
@@ -205,7 +216,10 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                             multiplePointers=multiplePointers || event.changes.count {it.pressed || it.previousPressed}>1
                             val pointers=event.changes.filter {it.pressed && it.previousPressed}
                             if(zoomAxes==null && event.changes.count {it.pressed}>=2) {
-                                zoomAxes=if(latestShowAxes) plotZoomAxes(event.changes.filter {it.pressed}.map {it.position},current2DView(),size,28*density) else PlotZoomAxes.Both
+                                val current=current2DView()
+                                zoomAxes=if(latestShowAxes) plotZoomAxes(event.changes.filter {it.pressed}.map {it.position},current,size,28*density,
+                                    horizontal=if(latestAppearance.logY) current.bottom else 0.0,
+                                    vertical=if(latestAppearance.logX) current.left else 0.0) else PlotZoomAxes.Both
                             }
                             val axes=if(pointers.size>=2) zoomAxes?:PlotZoomAxes.Both else PlotZoomAxes.Both
                             val zoom=if(axes==PlotZoomAxes.Both) event.calculateZoom() else plotAxisZoom(pointers.map {it.previousPosition},pointers.map {it.position},axes)
@@ -263,55 +277,81 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                 val scale=size.width/view.width
                 for (image in imageSources) {
                     val bitmap = images[image.uri] ?: continue
+                    fun imageX(x:Double)=sx(axisCoordinate(x,settings.appearance.logX))
+                    fun imageY(y:Double)=sy(axisCoordinate(y,settings.appearance.logY))
+                    val destination = android.graphics.RectF(imageX(image.x - image.width / 2), imageY(image.y + image.height / 2), imageX(image.x + image.width / 2), imageY(image.y - image.height / 2))
+                    if(!listOf(destination.left,destination.top,destination.right,destination.bottom).all {it.isFinite()}) continue
                     val canvas = drawContext.canvas.nativeCanvas
                     val save = canvas.save()
-                    canvas.rotate((-image.angle).toFloat(), sx(image.x), sy(image.y))
-                    val destination = android.graphics.RectF(sx(image.x - image.width / 2), sy(image.y + image.height / 2), sx(image.x + image.width / 2), sy(image.y - image.height / 2))
+                    canvas.rotate((-image.angle).toFloat(), imageX(image.x), imageY(image.y))
                     val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { alpha = (image.opacity.coerceIn(0.0, 1.0) * 255).toInt() }
                     canvas.drawBitmap(bitmap, null, destination, imagePaint)
                     canvas.restoreToCount(save)
                 }
-                val major=niceStep(90*density/scale)
+                val logX=settings.appearance.logX;val logY=settings.appearance.logY
+                val major=if(logX) max(1.0,ceil(90*density/scale)) else niceStep(90*density/scale)
                 val minor=major/5
-                val majorY=niceStep(90*density/(size.height/view.height))
-                fun grid(stepX:Double,stepY:Double,color:Color,width:Float) {
+                val majorY=if(logY) max(1.0,ceil(90*density/(size.height/view.height))) else niceStep(90*density/(size.height/view.height))
+                fun grid(stepX:Double,stepY:Double,color:Color,width:Float,minorGrid:Boolean=false) {
                     var x=ceil(view.left/stepX)*stepX
                     var guard=0
-                    while(x<=view.right && guard++<1000) {drawLine(color,Offset(sx(x),0f),Offset(sx(x),size.height.toFloat()),width);x+=stepX}
+                    if(logX && minorGrid) {
+                        var decade=floor(view.left)
+                        while(decade<=view.right && guard++<1000) {
+                            for(m in 2..9) {val p=decade+log10(m.toDouble());if(p in view.left..view.right) drawLine(color,Offset(sx(p),0f),Offset(sx(p),size.height),width)}
+                            decade++
+                        }
+                    } else while(x<=view.right && guard++<1000) {drawLine(color,Offset(sx(x),0f),Offset(sx(x),size.height.toFloat()),width);x+=stepX}
                     var y=ceil(view.bottom/stepY)*stepY
                     guard=0
-                    while(y<=view.top && guard++<1000) {drawLine(color,Offset(0f,sy(y)),Offset(size.width.toFloat(),sy(y)),width);y+=stepY}
+                    if(logY && minorGrid) {
+                        var decade=floor(view.bottom)
+                        while(decade<=view.top && guard++<1000) {
+                            for(m in 2..9) {val p=decade+log10(m.toDouble());if(p in view.bottom..view.top) drawLine(color,Offset(0f,sy(p)),Offset(size.width,sy(p)),width)}
+                            decade++
+                        }
+                    } else while(y<=view.top && guard++<1000) {drawLine(color,Offset(0f,sy(y)),Offset(size.width.toFloat(),sy(y)),width);y+=stepY}
                 }
-                if(settings.showGrid) {grid(minor,majorY/5,Color(0xFFDDDDDD),0.75f*density);grid(major,majorY,Color(0xFFAAAAAA),1f*density)}
+                if(settings.showGrid) {grid(minor,majorY/5,Color(0xFFDDDDDD),0.75f*density,true);grid(major,majorY,Color(0xFFAAAAAA),1f*density)}
                 for(fill in geometry.fills) {
                     val path=Path()
                     for(i in fill.coordinates.indices step 2) {val p=Offset(sx(fill.coordinates[i].toDouble()),sy(fill.coordinates[i+1].toDouble()));if(i==0)path.moveTo(p.x,p.y) else path.lineTo(p.x,p.y)}
                     path.close();drawPath(path,Color(fill.color).copy(alpha=0.14f))
                 }
                 if(settings.showAxes) {
-                    if(0.0 in view.left..view.right) drawLine(Color(0xFF222222),Offset(sx(0.0),0f),Offset(sx(0.0),size.height.toFloat()),1.5f*density)
-                    if(0.0 in view.bottom..view.top) drawLine(Color(0xFF222222),Offset(0f,sy(0.0)),Offset(size.width.toFloat(),sy(0.0)),1.5f*density)
+                    val axisX=if(logX) view.left else 0.0
+                    val axisY=if(logY) view.bottom else 0.0
+                    if(axisX in view.left..view.right) drawLine(Color(0xFF222222),Offset(sx(axisX),0f),Offset(sx(axisX),size.height.toFloat()),1.5f*density)
+                    if(axisY in view.bottom..view.top) drawLine(Color(0xFF222222),Offset(0f,sy(axisY)),Offset(size.width.toFloat(),sy(axisY)),1.5f*density)
                     labelPaint.textSize=13*density
-                    val baseline=sy(0.0).coerceIn(2*density,max(2*density,size.height-20*density))+16*density
+                    val baseline=sy(axisY).coerceIn(2*density,max(2*density,size.height-20*density))+16*density
+                    if(settings.appearance.numbers) {
                     var x=ceil(view.left/major)*major
                     var guard=0
                     while(x<=view.right && guard++<100) {
-                        if(abs(x)>major*1e-5) {
-                            val text=number(x);val textWidth=labelPaint.measureText(text)
+                        if(logX || abs(x)>major*1e-5) {
+                            val text=number(axisValue(x,logX));val textWidth=labelPaint.measureText(text)
                             val px=(sx(x)-textWidth/2).coerceIn(2*density,max(2*density,size.width-textWidth-2*density))
                             drawContext.canvas.nativeCanvas.apply {drawTextWithHalo(text,px,baseline,labelPaint,density)}
                         };x+=major
                     }
                     var y=ceil(view.bottom/majorY)*majorY
-                    val xPosition=sx(0.0).coerceIn(35*density,max(35*density,size.width-2*density))-5*density
+                    val xPosition=sx(axisX).coerceIn(35*density,max(35*density,size.width-2*density))-5*density
                     guard=0
                     while(y<=view.top && guard++<100) {
-                        if(abs(y)>majorY*1e-5) {
-                            val text=number(y)
+                        if(logY || abs(y)>majorY*1e-5) {
+                            val text=number(axisValue(y,logY))
                             drawContext.canvas.nativeCanvas.apply {drawTextWithHalo(text,xPosition-labelPaint.measureText(text),sy(y)+4*density,labelPaint,density)}
                         };y+=majorY
                     }
-                    if(0.0 in view.left..view.right && 0.0 in view.bottom..view.top) drawContext.canvas.nativeCanvas.drawTextWithHalo("0",sx(0.0)-13*density,baseline,labelPaint,density)
+                    if(!logX && !logY && 0.0 in view.left..view.right && 0.0 in view.bottom..view.top) drawContext.canvas.nativeCanvas.drawTextWithHalo("0",sx(0.0)-13*density,baseline,labelPaint,density)
+                    }
+                    if(settings.appearance.labels) {
+                        val canvas=drawContext.canvas.nativeCanvas
+                        val xLabel=settings.appearance.xLabel;val yLabel=settings.appearance.yLabel
+                        canvas.drawTextWithHalo(xLabel,max(4*density,size.width-labelPaint.measureText(xLabel)-8*density),max(16*density,sy(axisY)-8*density),labelPaint,density)
+                        canvas.drawTextWithHalo(yLabel,sx(axisX).coerceIn(4*density,max(4*density,size.width-labelPaint.measureText(yLabel)-4*density)),16*density,labelPaint,density)
+                    }
                 }
                 for(line in geometry.strokes) {
                     val a=line.coordinates
@@ -325,7 +365,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                 trace?.let {p ->
                     val x=sx(p.x.toDouble());val y=sy(p.y.toDouble())
                     drawCircle(Color.Black,4.5f*density,Offset(x,y))
-                    val text="(${number(p.x.toDouble())}, ${number(p.y.toDouble())})"
+                    val text="(${number(axisValue(p.x.toDouble(),logX))}, ${number(axisValue(p.y.toDouble(),logY))})"
                     labelPaint.textSize=17*density
                     val width=labelPaint.measureText(text)+18*density
                     val left=(x-width-8*density).coerceIn(4*density,max(4*density,size.width-width-4*density))
@@ -363,7 +403,7 @@ private fun niceStep(target:Double):Double {
 private fun validBounds(low:Double?,high:Double?):Pair<Double,Double>? =
     if(low!=null && high!=null && low.isFinite() && high.isFinite() && low<high) low to high else null
 private fun number(v:Double):String {
-    if(abs(v)<1e-10) return "0"
+    if(v==0.0) return "0"
     return if(abs(v)>=1e7 || abs(v)<1e-4) String.format(Locale.US,"%.3g",v)
     else if(abs(v-round(v))<1e-7) String.format(Locale.US,"%.0f",v)
     else String.format(Locale.US,"%.4f",v).trimEnd('0').trimEnd('.')
