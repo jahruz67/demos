@@ -18,7 +18,7 @@ const bundles = [
   ['katex/dist/katex.min.css', 'katex.css'],
   ['katex/dist/fonts', 'fonts'],
   ['mathjs/LICENSE', 'mathjs-LICENSE.txt'],
-  ['nerdamer/LICENSE', 'nerdamer-LICENSE.txt'],
+  ['nerdamer/license.txt', 'nerdamer-LICENSE.txt'],
   ['plotly.js-dist-min/LICENSE', 'plotly-LICENSE.txt'],
   ['katex/LICENSE', 'katex-LICENSE.txt'],
 ];
