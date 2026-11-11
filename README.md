@@ -12,7 +12,7 @@ Demos is an Android graphing calculator built with Kotlin and Jetpack Compose. I
 - Graph export as PNG or PDF.
 - Calculator, graph, and split layouts, plus degree/radian and complex-number settings.
 
-The native CAS runs on-device in a separate Android process. Normal app builds use the bundled Giac AAR; rebuilding native libraries is not required.
+The native CAS runs on-device in a separate Android process. Normal app builds use the bundled Giac AAR; rebuilding native libraries is not required
 
 ## Requirements
 
