@@ -107,11 +107,13 @@ jobs:
           cmake -S "$source_dir" -B "$RUNNER_TEMP/giac-build" -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
           cmake --build "$RUNNER_TEMP/giac-build" --target javagiac --parallel 2
           mkdir -p desktop/build/native-dist
-          cp "$RUNNER_TEMP/giac-build/javagiac.dll" desktop/build/native-dist/
+          cp "$RUNNER_TEMP/giac-build/libjavagiac.dll" desktop/build/native-dist/javagiac.dll
 
       - name: Build the Windows installer
         shell: pwsh
-        run: .\gradlew.bat --no-daemon :desktop:packageMsi "-PversionCode=${{ 1000 + github.run_number }}"
+        run: |
+          $versionCode = 1000 + [int]$env:GITHUB_RUN_NUMBER
+          .\gradlew.bat --no-daemon :desktop:packageMsi "-PversionCode=$versionCode"
 
       - name: Collect installer and native runtime
         shell: pwsh
