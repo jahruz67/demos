@@ -39,20 +39,22 @@ object MathInputRules {
         val at = previous.selection.end
         if (at > 0 && proposed.text == previous.text.removeRange(at - 1, at)) return backspace(previous)
         if (proposed.text.length == previous.text.length - 1 && at > 0 && at < previous.text.length &&
-            previous.text[at - 1] in "([{" && previous.text[at] == closing(previous.text[at - 1]) &&
+            previous.text[at - 1] in "[{" && previous.text[at] == closing(previous.text[at - 1]) &&
             proposed.text == previous.text.removeRange(at - 1, at)) {
             return TextFieldValue(previous.text.removeRange(at - 1, at + 1), TextRange(at - 1))
         }
         if (proposed.text.length != previous.text.length + 1 || proposed.selection.end != at + 1 ||
             proposed.text.take(at) != previous.text.take(at) || proposed.text.drop(at + 1) != previous.text.drop(at)) return proposed
         val typed = proposed.text[at]
-        if (at < previous.text.length && typed in ")]}" && previous.text[at] == typed) {
+        // Parentheses are literal keystrokes; only structured argument delimiters pair.
+        if (typed == '(' || typed == ')') return proposed
+        if (at < previous.text.length && typed in "]}" && previous.text[at] == typed) {
             return previous.copy(selection = TextRange(at + 1))
         }
-        // Allow an explicit '(' after an auto-completed function without nesting a second pair.
-        if (typed in "({" && at > 0 && at < previous.text.length && previous.text[at - 1] == typed &&
+        // Allow an explicit brace after an auto-completed LaTeX argument.
+        if (typed == '{' && at > 0 && at < previous.text.length && previous.text[at - 1] == typed &&
             previous.text[at] == closing(typed) && identifier.find(previous.text.take(at - 1)) != null) return previous
-        if (typed in "([{") {
+        if (typed in "[{") {
             return proposed.copy(text = proposed.text.substring(0, at + 1) + closing(typed) + proposed.text.substring(at + 1))
         }
         if (!typed.isLetterOrDigit()) return proposed
@@ -81,7 +83,8 @@ object MathInputRules {
         val separated = if (split > 0) proposed.text.substring(0, boundary) + "*" + proposed.text.substring(boundary) else proposed.text
         val nextEnd = end + if (split > 0) 1 else 0
         if (separated.getOrNull(nextEnd) in listOf('(', '{')) return proposed.copy(text = separated, selection = TextRange(nextEnd))
-        val pair = if (latex && function == "sqrt") "{}" else "()"
+        if (!latex || function != "sqrt") return proposed.copy(text = separated, selection = TextRange(nextEnd))
+        val pair = "{}"
         return proposed.copy(text = separated.take(nextEnd) + pair + separated.drop(nextEnd), selection = TextRange(nextEnd + 1))
     }
 
@@ -97,7 +100,25 @@ object MathInputRules {
     }
 
     fun move(value: TextFieldValue, direction: Int): TextFieldValue {
-        val offsets = editableMath(value.text).caretOffsets(value.text)
+        if (!value.selection.collapsed) return value.copy(selection = TextRange(if (direction < 0) value.selection.min else value.selection.max))
+        val tree = editableMath(value.text)
+        fun rawScriptAtEnd(node: EditableMath): EditableMath.Script? = when (node) {
+            is EditableMath.Row -> node.children.firstNotNullOfOrNull(::rawScriptAtEnd)
+            is EditableMath.Script -> rawScriptAtEnd(node.body) ?: node.takeIf {
+                it.body.end == value.selection.end && it.end == it.body.end && value.text.getOrNull(it.body.start) !in listOf('{', '(')
+            }
+            is EditableMath.Fraction -> rawScriptAtEnd(node.top) ?: rawScriptAtEnd(node.bottom)
+            is EditableMath.Root -> node.index?.let(::rawScriptAtEnd) ?: rawScriptAtEnd(node.body)
+            is EditableMath.Text -> null
+        }
+        // Raw ^3 shares one source offset for the exponent end and the exit.
+        // Braces keep subsequent digits outside the exponent after moving right.
+        if (direction > 0) rawScriptAtEnd(tree)?.let { script ->
+            val body = value.text.substring(script.body.start, script.body.end)
+            val text = value.text.replaceRange(script.body.start, script.body.end, "{$body}")
+            return TextFieldValue(text, TextRange(script.end + 2))
+        }
+        val offsets = tree.caretOffsets(value.text)
         val next = if (direction < 0) offsets.lastOrNull { it < value.selection.end } else offsets.firstOrNull { it > value.selection.end }
         return value.copy(selection = TextRange(next ?: value.selection.end))
     }
@@ -130,7 +151,7 @@ object MathInputRules {
                 return value.copy(selection = TextRange(slot))
             }
         }
-        if (at < value.text.length && value.text[at - 1] in "([{" && value.text[at] == closing(value.text[at - 1])) {
+        if (at < value.text.length && value.text[at - 1] in "[{" && value.text[at] == closing(value.text[at - 1])) {
             return TextFieldValue(value.text.removeRange(at - 1, at + 1), TextRange(at - 1))
         }
         // Delete a rendered LaTeX symbol as a unit.

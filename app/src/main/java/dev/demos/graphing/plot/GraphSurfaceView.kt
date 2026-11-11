@@ -258,15 +258,15 @@ private class SurfaceRenderer(private val camera:GraphCameraState, private val o
             grid.segment(Vec3(x.first,yy,0.0),Vec3(x.second,yy,0.0))
         }
         gridMesh=buffer(Mesh3D(0xFFD0D0D0.toInt(),grid.array(),Mesh3D.LINES))
-        val axes=FloatBuilder()
-        axes.segment(Vec3(x.first,0.0,0.0),Vec3(x.second,0.0,0.0))
-        axes.segment(Vec3(0.0,y.first,0.0),Vec3(0.0,y.second,0.0))
-        axes.segment(Vec3(0.0,0.0,z.first),Vec3(0.0,0.0,z.second))
+        val axes=List(3) { FloatBuilder() }
+        axes[0].segment(Vec3(x.first,0.0,0.0),Vec3(x.second,0.0,0.0))
+        axes[1].segment(Vec3(0.0,y.first,0.0),Vec3(0.0,y.second,0.0))
+        axes[2].segment(Vec3(0.0,0.0,z.first),Vec3(0.0,0.0,z.second))
         val ax=(x.second-x.first)*.04;val ay=(y.second-y.first)*.04;val az=(z.second-z.first)*.04
-        axes.segment(Vec3(x.second,0.0,0.0),Vec3(x.second-ax,ay,0.0));axes.segment(Vec3(x.second,0.0,0.0),Vec3(x.second-ax,-ay,0.0))
-        axes.segment(Vec3(0.0,y.second,0.0),Vec3(ax,y.second-ay,0.0));axes.segment(Vec3(0.0,y.second,0.0),Vec3(-ax,y.second-ay,0.0))
-        axes.segment(Vec3(0.0,0.0,z.second),Vec3(ax,0.0,z.second-az));axes.segment(Vec3(0.0,0.0,z.second),Vec3(-ax,0.0,z.second-az))
-        axisMeshes=listOf(buffer(Mesh3D(0xFF888888.toInt(),axes.array(),Mesh3D.LINES)))
+        axes[0].segment(Vec3(x.second,0.0,0.0),Vec3(x.second-ax,ay,0.0));axes[0].segment(Vec3(x.second,0.0,0.0),Vec3(x.second-ax,-ay,0.0))
+        axes[1].segment(Vec3(0.0,y.second,0.0),Vec3(ax,y.second-ay,0.0));axes[1].segment(Vec3(0.0,y.second,0.0),Vec3(-ax,y.second-ay,0.0))
+        axes[2].segment(Vec3(0.0,0.0,z.second),Vec3(ax,0.0,z.second-az));axes[2].segment(Vec3(0.0,0.0,z.second),Vec3(-ax,0.0,z.second-az))
+        axisMeshes=axes.mapIndexed { index, vertices -> buffer(Mesh3D(graphAxisColors[index],vertices.array(),Mesh3D.LINES)) }
     }
     private fun draw(mesh:BufferedMesh) {
         GLES30.glUniform4f(colorLocation,((mesh.color shr 16) and 255)/255f,((mesh.color shr 8) and 255)/255f,(mesh.color and 255)/255f,1f)

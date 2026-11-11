@@ -4,6 +4,8 @@ import kotlinx.serialization.Serializable
 import kotlin.math.log10
 import kotlin.math.pow
 
+internal val graphAxisColors = listOf(0xFFB7473F.toInt(), 0xFF43813F.toInt(), 0xFF3275B8.toInt())
+
 @Serializable
 data class GraphAppearance(
     val xLabel: String = "x",

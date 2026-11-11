@@ -249,10 +249,13 @@ fun CalculatorScreen(
         updateInput(row, MathInputRules.backspace(value), complete = false)
     }
     fun moveCursor(delta: Int) {
-        if (tableEditing?.id == state.activeId) { tableValue = MathInputRules.move(tableValue, delta); return }
+        tableEditing?.takeIf { it.id == state.activeId }?.let { cell ->
+            updateTableInput(cell, MathInputRules.move(tableValue, delta))
+            return
+        }
         val row = state.rows.firstOrNull { it.id == state.activeId } ?: return
         val value = editorValue(row)
-        editorValues[row.id] = MathInputRules.move(value, delta)
+        updateInput(row, MathInputRules.move(value, delta), complete = false)
     }
     fun moveTableCell(rowDelta: Int, columnDelta: Int = 0): Boolean {
         val cell = tableEditing?.takeIf { it.id == state.activeId } ?: return false
@@ -289,10 +292,9 @@ fun CalculatorScreen(
             "space" -> edit(" ")
             "⌫" -> erase()
             "↵" -> addRow()
-            "a²" -> edit("^2")
+            "a²" -> edit("^{2}")
             "aᵇ" -> edit("^{}", 1)
             "√" -> edit("sqrt()", 1)
-            "()" -> edit("()", 1)
             "|a|" -> edit("abs()", 1)
             "π" -> {
                 val row = state.rows.firstOrNull { it.id == state.activeId } ?: return
@@ -877,7 +879,7 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
         }
         if (!tablet) {
             Row(Modifier.fillMaxWidth().height(34.dp * keyScale), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                val shortcuts = if (calculator) listOf("a²", "π", "!", "←", "→") else listOf("aᵇ", "√", "π", "←", "→")
+                val shortcuts = if (calculator) listOf("a²", "π", "!", "←", "→") else listOf("aᵇ", if (is3D) "z" else "√", "π", "←", "→")
                 shortcuts.forEach { label -> KeyTile(label, Modifier.weight(1f)) { onKey(label) } }
             }
         }
@@ -939,7 +941,7 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
             }
         } else if (landscape) {
             val digits = listOf(listOf("7", "8", "9", "÷"), listOf("4", "5", "6", "×"), listOf("1", "2", "3", "−"), listOf("0", ".", "=", "+"))
-            val extras = listOf(listOf(first, second, if (!calculator && is3D) "z" else "("), listOf("ABC", "funcs", if (!calculator && is3D) "()" else ")"), listOf("space", ",", "⌫"), listOf("a²", "√", "↵"))
+            val extras = listOf(listOf(first, second, "("), listOf("ABC", "funcs", ")"), listOf("space", ",", "⌫"), listOf("a²", "√", "↵"))
             repeat(4) { index ->
                 Row(Modifier.fillMaxWidth().height(44.dp * keyScale), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     digits[index].forEach { label -> KeyTile(label, Modifier.weight(1f), gray = label.first().isDigit()) { onKey(label) } }
@@ -954,8 +956,8 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
             val rows = listOf(
                 listOf(first, "7", "8", "9", "÷"),
                 listOf(second, "4", "5", "6", "×"),
-                listOf(if (!calculator && is3D) "z" else "(", "1", "2", "3", "−"),
-                listOf(if (!calculator && is3D) "()" else ")", "0", ".", "=", "+"),
+                listOf("(", "1", "2", "3", "−"),
+                listOf(")", "0", ".", "=", "+"),
                 listOf("ABC", "funcs", "space", "⌫", "↵"),
             )
             rows.forEach { row ->
@@ -1338,7 +1340,7 @@ private fun HelpSheet(onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White) {
         Column(Modifier.fillMaxWidth().heightIn(max = 610.dp).verticalScroll(rememberScrollState()).padding(horizontal = 23.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Text("Calculator guide", fontSize = 23.sp)
-            Text("Edit mathematics directly: tap a numerator, denominator, or exponent to place the cursor there. Division creates a fraction; use the arrow keys to move between slots or out of a fraction. Hold and drag to select. Typing sin, cos, sqrt, or other function names opens an argument pair automatically. The keypad adapts to calculator, 2D, and 3D modes. Decimal results appear by default; choose Decimal or Exact in Settings. Tap a result to switch formats; long-press to copy it. Drag the small blue handle above the keypad up or down to adjust its height.", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
+            Text("Edit mathematics directly: tap a numerator, denominator, or exponent to place the cursor there. Division creates a fraction; use the arrow keys to move between slots or out of a fraction. Hold and drag to select. Type opening and closing parentheses yourself; typing a function name does not add parentheses. The keypad adapts to calculator, 2D, and 3D modes. Decimal results appear by default; choose Decimal or Exact in Settings. Tap a result to switch formats; long-press to copy it. Drag the small blue handle above the keypad up or down to adjust its height.", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
             Text("Symbolic mathematics is powered by Giac/Xcas and runs on your device. Use exact fractions and assumptions when you need symbolic results.", fontSize = 12.sp, color = Muted, lineHeight = 18.sp)
             listOf(
                 "2D graphs" to "y=sin(x)\nx^2+y^2=9\ny<x^2\na=2\ny=a*x^2",

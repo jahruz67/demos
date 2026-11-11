@@ -183,10 +183,13 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
                     if (event.type != KeyEventType.KeyDown) false else when (event.key) {
                         Key.Backspace -> { onInput(MathInputRules.backspace(value)); true }
                         Key.DirectionLeft, Key.DirectionRight -> {
-                            val offsets = tree.caretOffsets(value.text)
-                            val next = if (event.key == Key.DirectionLeft) offsets.lastOrNull { it < value.selection.end }
-                                else offsets.firstOrNull { it > value.selection.end }
-                            if (next != null) choose(next, event.isShiftPressed)
+                            val direction = if (event.key == Key.DirectionLeft) -1 else 1
+                            if (event.isShiftPressed) {
+                                val offsets = tree.caretOffsets(value.text)
+                                val next = if (direction < 0) offsets.lastOrNull { it < value.selection.end }
+                                    else offsets.firstOrNull { it > value.selection.end }
+                                if (next != null) choose(next, true)
+                            } else onInput(MathInputRules.move(value, direction))
                             true
                         }
                         Key.DirectionUp, Key.DirectionDown -> {
@@ -220,7 +223,7 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
                                     up.consume()
                                     showToolbar = false
                                     nearest(viewportOrigin + up.position)?.let { choose(it) }
-                                    showHandles = true
+                                    showHandles = false
                                 }
                             } else {
                                 val offset = nearest(viewportOrigin + down.position) ?: 0
@@ -251,12 +254,12 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
                         MathEditorNode(tree, value, fontSize, owner, selected && caretVisible, hits)
                       }
                     }
-                    if (selected && showHandles) {
+                    if (selected && showHandles && !value.selection.collapsed) {
                         fun dragStart(point: MathHit) {
                             showToolbar = false
                             handleDragPoint = point.position + Offset(0f, point.height / 2)
                         }
-                        if (!value.selection.collapsed) startHit?.let { point ->
+                        startHit?.let { point ->
                             MathSelectionHandle(point, viewportOrigin, "Selection start",
                                 onStart = { dragStart(point) }, onEnd = { showToolbar = true }, onDrag = { delta ->
                                     handleDragPoint += delta
@@ -264,7 +267,7 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
                                 })
                         }
                         endHit?.let { point ->
-                            MathSelectionHandle(point, viewportOrigin, if (value.selection.collapsed) "Move cursor" else "Selection end",
+                            MathSelectionHandle(point, viewportOrigin, "Selection end",
                                 onStart = { dragStart(point) }, onEnd = { showToolbar = true }, onDrag = { delta ->
                                     handleDragPoint += delta
                                     nearest(handleDragPoint)?.let { offset ->
@@ -328,8 +331,11 @@ private fun MathEditorNode(node: EditableMath, value: TextFieldValue, size: Int,
             }
             exit()
         }
-        is EditableMath.Script -> Row(Modifier.padding(bottom = if (node.raised) (size * .65).dp else 0.dp,
-            top = if (!node.raised) (size * .5).dp else 0.dp), verticalAlignment = Alignment.CenterVertically) { child(node.body, childSize()); exit() }
+        is EditableMath.Script -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.padding(bottom = if (node.raised) (size * .65).dp else 0.dp,
+                top = if (!node.raised) (size * .5).dp else 0.dp)) { child(node.body, childSize()) }
+            exit()
+        }
         is EditableMath.Root -> Row(verticalAlignment = Alignment.CenterVertically) {
             entry()
             node.index?.let { index -> Box(Modifier.padding(bottom = (size * .7).dp)) { child(index, childSize()) } }
