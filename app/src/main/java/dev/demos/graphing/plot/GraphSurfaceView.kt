@@ -140,24 +140,37 @@ private class SurfaceRenderer(private val camera:GraphCameraState):GLSurfaceView
     }
     fun setMeshes(meshes:List<Mesh3D>) {inspectionMeshes=meshes;pending=meshes}
     override fun onSurfaceCreated(gl:GL10?,config:EGLConfig?) {
-        GLES30.glClearColor(1f,1f,1f,1f)
+        GLES30.glClearColor(0.035f,0.055f,0.10f,1f)
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         val vertex="""#version 300 es
             layout(location=0) in vec3 a_position;
             layout(location=1) in vec3 a_normal;
             uniform mat4 u_mvp;
             out vec3 v_normal;
-            void main() {gl_Position=u_mvp*vec4(a_position,1.0); gl_PointSize=13.0;v_normal=a_normal;}
+            out float v_depth;
+            void main() {
+              gl_Position=u_mvp*vec4(a_position,1.0);
+              gl_PointSize=13.0;
+              v_normal=a_normal;
+              v_depth=abs(gl_Position.z/gl_Position.w);
+            }
         """.trimIndent()
         val fragment="""#version 300 es
             precision mediump float;
             in vec3 v_normal;
+            in float v_depth;
             uniform vec4 u_color;
             uniform float u_light;
             out vec4 outColor;
             void main() {
-              float diffuse=0.45+0.55*abs(dot(normalize(v_normal),normalize(vec3(0.4,-0.6,0.9))));
-              outColor=vec4(u_color.rgb*mix(1.0,diffuse,u_light),u_color.a);
+              vec3 normal=normalize(v_normal);
+              vec3 light=normalize(vec3(0.4,-0.6,0.9));
+              float diffuse=0.38+0.62*max(dot(normal,light),0.0);
+              vec3 halfVector=normalize(light+vec3(0.0,0.0,1.0));
+              float highlight=pow(max(dot(normal,halfVector),0.0),24.0)*0.28*u_light;
+              vec3 lit=u_color.rgb*mix(1.0,diffuse,u_light)+highlight;
+              float fog=smoothstep(0.25,1.0,v_depth)*0.22;
+              outColor=vec4(mix(lit,vec3(0.07,0.10,0.17),fog),u_color.a);
             }
         """.trimIndent()
         program=GLES30.glCreateProgram()
@@ -179,7 +192,7 @@ private class SurfaceRenderer(private val camera:GraphCameraState):GLSurfaceView
             gridVertices.vertex(Vec3(i.toDouble(),-5.0,0.0),Vec3(0.0,0.0,1.0));gridVertices.vertex(Vec3(i.toDouble(),5.0,0.0),Vec3(0.0,0.0,1.0))
             gridVertices.vertex(Vec3(-5.0,i.toDouble(),0.0),Vec3(0.0,0.0,1.0));gridVertices.vertex(Vec3(5.0,i.toDouble(),0.0),Vec3(0.0,0.0,1.0))
         }
-        gridMesh=buffer(Mesh3D(0xFFD5D9DD.toInt(),gridVertices.array(),Mesh3D.LINES))
+        gridMesh=buffer(Mesh3D(0xFF53627A.toInt(),gridVertices.array(),Mesh3D.LINES))
         pending=inspectionMeshes
     }
     override fun onSurfaceChanged(gl:GL10?,width:Int,height:Int) {

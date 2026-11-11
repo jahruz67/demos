@@ -125,12 +125,12 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                 update={it.update(meshes,settings,resetCounter)},
                 onRelease={it.release()},
             )
-            Row(Modifier.align(Alignment.BottomStart).padding(10.dp),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
+            Row(Modifier.align(Alignment.BottomStart).padding(10.dp).background(Color(0xAA0B1220),RoundedCornerShape(6.dp)).padding(horizontal=8.dp,vertical=5.dp),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
                 BasicText("x",style=TextStyle(color=Color(0xFFBD4942),fontSize=12.sp))
                 BasicText("y",style=TextStyle(color=Color(0xFF43813F),fontSize=12.sp))
                 BasicText("z",style=TextStyle(color=Color(0xFF3275B8),fontSize=12.sp))
             }
-            if(showControls) BasicText("Drag to rotate · Pinch to zoom",Modifier.align(Alignment.BottomCenter).padding(8.dp),style=TextStyle(color=Color(0xFF666666),fontSize=10.sp))
+            if(showControls) BasicText("Drag to rotate · Pinch to zoom",Modifier.align(Alignment.BottomCenter).background(Color(0xAA0B1220),RoundedCornerShape(6.dp)).padding(horizontal=8.dp,vertical=5.dp),style=TextStyle(color=Color(0xFFD5DDED),fontSize=10.sp))
             inspectedPoint?.let {BasicText(it,Modifier.align(Alignment.TopStart).padding(8.dp).background(Color.White,RoundedCornerShape(5.dp)).border(1.dp,Color(0xFFD4D4D4),RoundedCornerShape(5.dp)).padding(8.dp),style=TextStyle(color=Color(0xFF333333),fontSize=16.sp))}
         } else {
             Canvas(Modifier.fillMaxSize()
