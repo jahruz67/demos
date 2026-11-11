@@ -4,7 +4,7 @@ package dev.demos.graphing.ui
 internal sealed interface EditableMath {
     val start: Int
     val end: Int
-    data class Text(override val start: Int, override val end: Int) : EditableMath
+    data class Text(override val start: Int, override val end: Int, val placeholder: Boolean = true) : EditableMath
     data class Row(val children: List<EditableMath>, override val start: Int, override val end: Int) : EditableMath
     data class Fraction(val top: EditableMath, val bottom: EditableMath, override val start: Int, override val end: Int) : EditableMath
     data class Script(val body: EditableMath, val raised: Boolean, override val start: Int, override val end: Int) : EditableMath
@@ -126,7 +126,8 @@ private class EditableMathReader(val source: String) {
                 val last = close(at, end)
                 if (last != null) {
                     flush(at + 1)
-                    children += read(at + 1, last, depth + 1)
+                    children += if (at + 1 == last) EditableMath.Text(last, last, placeholder = false)
+                        else read(at + 1, last, depth + 1)
                     children += EditableMath.Text(last, last + 1)
                     at = last + 1; textStart = at; continue
                 }

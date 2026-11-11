@@ -73,6 +73,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.BaselineShift
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -113,6 +115,7 @@ fun CalculatorScreen(
     var showSave by remember { mutableStateOf(false) }
     var showLibrary by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var graphSettings by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
@@ -357,7 +360,7 @@ fun CalculatorScreen(
             DropdownMenuItem(text = { Text("Save graph") }, onClick = { showSave = true; showMenu = false })
             DropdownMenuItem(text = { Text("Calculator fullscreen") }, onClick = { onAction(CalculatorAction.SetLayout(CalculatorLayout.Calculator)); showMenu = false })
             DropdownMenuItem(text = { Text("Graph fullscreen") }, onClick = { onAction(CalculatorAction.SetLayout(CalculatorLayout.Graph)); showMenu = false })
-            DropdownMenuItem(text = { Text("Settings") }, onClick = { showSettings = true; showMenu = false })
+            DropdownMenuItem(text = { Text("Settings") }, onClick = { graphSettings = false; showSettings = true; showMenu = false })
             DropdownMenuItem(text = { Text(if (editingList) "Finish editing expression list" else "Edit expression list") }, onClick = { editingList = !editingList; showMenu = false })
             HorizontalDivider()
             DropdownMenuItem(text = { Text("Export graph file") }, onClick = { onAction(CalculatorAction.ExportDocument); showMenu = false })
@@ -394,7 +397,7 @@ fun CalculatorScreen(
                 Box(modifier) {
                     graphState.SaveableStateProvider("graph") { graph(state.is3D, Modifier.fillMaxSize()) }
                     if (showGraphControls) {
-                        GraphTool(IconKind.Wrench, "Graph settings", Modifier.align(Alignment.TopEnd).padding(5.dp)) { showSettings = true }
+                        GraphTool(IconKind.Wrench, "Graph settings", Modifier.align(Alignment.TopEnd).padding(5.dp)) { graphSettings = true; showSettings = true }
                         if (state.layout == CalculatorLayout.Graph) GraphTool(IconKind.Export, "Export graph", Modifier.align(Alignment.BottomEnd).padding(6.dp)) { showGraphExport = true }
                     }
                 }
@@ -405,7 +408,7 @@ fun CalculatorScreen(
                     onAdd = { showAddMenu = !showAddMenu }, onUndo = { onAction(CalculatorAction.Undo) },
                     onRedo = { onAction(CalculatorAction.Redo) },
                     onCollapse = { setKeyboardVisible(!keyboardVisible) },
-                    onSettings = { showSettings = true },
+                    onSettings = { graphSettings = false; showSettings = true },
                     fullscreen = state.layout == CalculatorLayout.Calculator,
                     onFullscreen = {
                         onAction(CalculatorAction.SetLayout(if (state.layout == CalculatorLayout.Calculator) CalculatorLayout.Split else CalculatorLayout.Calculator))
@@ -595,7 +598,7 @@ fun CalculatorScreen(
         onAction(CalculatorAction.Save(title)); showSave = false
     }
     if (showLibrary) LibrarySheet(state.savedGraphs, { showLibrary = false }, onAction)
-    if (showSettings) SettingsSheet(state, { showSettings = false }, onAction)
+    if (showSettings) SettingsSheet(state, graphSettings, { showSettings = false }, onAction)
     if (showHelp) HelpSheet { showHelp = false }
     colorEditor?.let { row -> ColorPaletteDialog(row.color, { colorEditor = null }) { color ->
         onAction(CalculatorAction.SetColor(row.id, color)); colorEditor = null
@@ -842,9 +845,10 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
     val first = if (calculator) "aᵇ" else "x"
     val second = if (calculator) "√" else "y"
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
     // Reserve space for the worksheet on short screens, including landscape phones.
-    val keyRowsHeight = if (tab == "ABC") (if (landscape) 186f else 210f) else if (landscape) 210f else 264f
-    val spacingHeight = if (tab == "ABC" || landscape) 30f else 34f
+    val keyRowsHeight = if (tablet) 176f else if (tab == "ABC") (if (landscape) 186f else 210f) else if (landscape) 210f else 264f
+    val spacingHeight = if (tablet) 22f else if (tab == "ABC" || landscape) 30f else 34f
     val maximumScale = ((LocalConfiguration.current.screenHeightDp - 160f - 20f - spacingHeight) / keyRowsHeight).coerceIn(.6f, 1.4f)
     val keyScale = heightScale.coerceIn(.6f, 1.4f).coerceAtMost(maximumScale)
     val density = LocalDensity.current
@@ -871,11 +875,55 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
             }, contentAlignment = Alignment.Center) {
             Box(Modifier.width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Blue))
         }
-        Row(Modifier.fillMaxWidth().height(34.dp * keyScale), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            val shortcuts = if (calculator) listOf("a²", "π", "!", "←", "→") else listOf("aᵇ", "√", "π", "←", "→")
-            shortcuts.forEach { label -> KeyTile(label, Modifier.weight(1f)) { onKey(label) } }
+        if (!tablet) {
+            Row(Modifier.fillMaxWidth().height(34.dp * keyScale), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                val shortcuts = if (calculator) listOf("a²", "π", "!", "←", "→") else listOf("aᵇ", "√", "π", "←", "→")
+                shortcuts.forEach { label -> KeyTile(label, Modifier.weight(1f)) { onKey(label) } }
+            }
         }
-        if (tab == "ABC") {
+        if (tablet) {
+            val math = listOf(
+                listOf(first, second, "a²", "aᵇ"),
+                listOf("(", ")", "<", ">"),
+                listOf(if (!calculator && is3D) "z" else "|a|", ",", "≤", "≥"),
+                listOf("ABC", "speak", "√", "π"),
+            )
+            val digits = listOf(listOf("7", "8", "9", "÷"), listOf("4", "5", "6", "×"),
+                listOf("1", "2", "3", "−"), listOf("0", ".", "=", "+"))
+            val letters = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+            repeat(4) { index ->
+                Row(Modifier.fillMaxWidth().height(44.dp * keyScale), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (tab == "ABC" && index < 3) {
+                        Row(Modifier.weight(8f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            letters[index].forEach { letter ->
+                                KeyTile(letter.toString(), Modifier.weight(1f), alphabet = true) { onKey(letter.toString()) }
+                            }
+                        }
+                    } else {
+                        Row(Modifier.weight(4f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            val labels = if (tab == "ABC") listOf("123", "space") else math[index]
+                            labels.forEach { label ->
+                                KeyTile(label, Modifier.weight(if (label == "space") 3f else 1f), gray = label in listOf("ABC", "123", "speak")) { onKey(label) }
+                            }
+                        }
+                        Row(Modifier.weight(4f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            val labels = if (tab == "ABC") listOf("(", ")", ",", ".") else digits[index]
+                            labels.forEach { label ->
+                                KeyTile(label, Modifier.weight(1f), gray = label.first().isDigit() || label == ".") { onKey(label) }
+                            }
+                        }
+                    }
+                    Row(Modifier.weight(2f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        when (index) {
+                            0 -> FunctionMenuKey(Modifier.weight(1f), onTemplate, keypadTop)
+                            1 -> listOf("←", "→").forEach { label -> KeyTile(label, Modifier.weight(1f), gray = true) { onKey(label) } }
+                            2 -> KeyTile("⌫", Modifier.weight(1f), gray = true) { onKey("⌫") }
+                            else -> KeyTile("↵", Modifier.weight(1f), blue = true) { onKey("↵") }
+                        }
+                    }
+                }
+            }
+        } else if (tab == "ABC") {
             listOf("qwertyuiop", "asdfghjkl", "zxcvbnm").forEach { letters ->
                 Row(Modifier.fillMaxWidth().height((if (landscape) 36.dp else 44.dp) * keyScale), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     if (letters.length < 10) Spacer(Modifier.weight((10 - letters.length) / 2f))
@@ -937,7 +985,7 @@ internal fun KeyTile(label: String, modifier: Modifier = Modifier, gray: Boolean
             "↵" -> CalcIcon(IconKind.Return, Color.White, Modifier.size(27.dp))
             "edit" -> Text("✎", color = Color(0xFF828282), fontSize = 18.sp * labelScale)
             "speak" -> CalcIcon(IconKind.Speaker, Color(0xFF858585), Modifier.size(18.dp))
-            else -> Text(label, color = if (blue) Color.White else Color.Black,
+            else -> Text(if (label == "funcs") "functions" else label, color = if (blue) Color.White else Color.Black,
                 fontSize = (when { alphabet -> 20.sp; label.length == 1 && label[0].isDigit() -> 30.sp; label in listOf("ABC", "123", "funcs", "space") -> 15.sp; label.length > 2 -> 18.sp; else -> 24.sp }) * labelScale,
                 fontFamily = if (alphabet || label in listOf("ABC", "123", "funcs", "space", "←", "→")) FontFamily.SansSerif else MathFont,
                 fontStyle = if (!alphabet && (label in listOf("x", "y", "a²", "aᵇ") || (label.length == 1 && label[0].isLetter()))) FontStyle.Italic else FontStyle.Normal)
@@ -1121,59 +1169,43 @@ private fun LibrarySheet(graphs: List<SavedGraph>, onDismiss: () -> Unit, onActi
 }
 
 @Composable
-private fun SettingsSheet(state: CalculatorUiState, onDismiss: () -> Unit, onAction: (CalculatorAction) -> Unit) {
-    val ranges = remember(state.bounds) {
-        with(state.bounds) { mutableStateListOf(xMin?.toString().orEmpty(), xMax?.toString().orEmpty(), yMin?.toString().orEmpty(), yMax?.toString().orEmpty(),
+private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDismiss: () -> Unit, onAction: (CalculatorAction) -> Unit) {
+    val activeBounds = if (state.is3D) state.bounds3D else state.bounds
+    val ranges = remember(state.is3D, activeBounds) {
+        with(activeBounds) { mutableStateListOf(xMin?.toString().orEmpty(), xMax?.toString().orEmpty(), yMin?.toString().orEmpty(), yMax?.toString().orEmpty(),
             zMin?.toString().orEmpty(), zMax?.toString().orEmpty(), tMin.toString(), tMax.toString(), uMin.toString(), uMax.toString(), vMin.toString(), vMax.toString()) }
     }
-    var showParameters by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
+    var showBounds by remember(state.is3D) { mutableStateOf(!state.is3D) }
     var boundsError by remember { mutableStateOf<String?>(null) }
     var precision by remember(state.precisionDigits) { mutableStateOf(state.precisionDigits.toString()) }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 650.dp).verticalScroll(rememberScrollState()).imePadding().padding(horizontal = 23.dp).navigationBarsPadding()) {
-            Text("Settings", fontSize = 23.sp, modifier = Modifier.padding(bottom = 15.dp))
-            Text("Default result format", fontSize = 15.sp)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                listOf("Decimal" to true, "Exact" to false).forEach { (label, decimal) ->
-                    FilterChip(selected = state.defaultDecimal == decimal,
-                        onClick = { onAction(CalculatorAction.SetDefaultDecimal(decimal)) }, label = { Text(label) })
-                }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
+            Box(Modifier.matchParentSize().clickable(onClick = onDismiss))
+            Surface(Modifier.align(Alignment.TopEnd).padding(12.dp).widthIn(max = 400.dp).fillMaxWidth()
+                .heightIn(max = (maxHeight - 24.dp).coerceAtLeast(0.dp)),
+                shape = RoundedCornerShape(6.dp), color = Color.White, shadowElevation = 8.dp, border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(15.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (!graphSettings) "App settings" else if (state.is3D) "3D graph settings" else "2D graph settings", fontSize = 18.sp, modifier = Modifier.weight(1f))
+                Text("×", modifier = Modifier.clickable(onClick = onDismiss).padding(horizontal = 6.dp), fontSize = 24.sp, color = Muted)
             }
-            Text("Tap a result to switch between exact and decimal. Symbolic answers stay exact.", fontSize = 11.sp, color = Muted)
-            KeyboardHeightControl(state.keyboardHeightScale) { onAction(CalculatorAction.SetKeyboardHeightScale(it)) }
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
-            SettingRow("Grid", "Show coordinate grid", state.showGrid) { onAction(CalculatorAction.SetGrid(it)) }
-            SettingRow("Axes", "Show axes and labels", state.showAxes) { onAction(CalculatorAction.SetAxes(it)) }
+            if (graphSettings) {
+            SettingsCheck(if (state.is3D) "XY plane grid" else "Grid", if (state.is3D) state.showGrid3D else state.showGrid) { onAction(CalculatorAction.SetGrid(it)) }
+            SettingsCheck(if (state.is3D) "3D axes and box" else "Axes and numbers", if (state.is3D) state.showAxes3D else state.showAxes) { onAction(CalculatorAction.SetAxes(it)) }
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
-            Text("Angle measure", fontSize = 15.sp, modifier = Modifier.padding(bottom = 8.dp))
-            Row(Modifier.fillMaxWidth().padding(bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                listOf("Radians" to false, "Degrees" to true).forEach { (label, degrees) ->
-                    FilterChip(selected = state.degreeMode == degrees, onClick = { onAction(CalculatorAction.SetDegreeMode(degrees)) }, label = { Text(label) })
-                }
-            }
-            HorizontalDivider(Modifier.padding(bottom = 12.dp))
-            Text("Computer algebra", fontSize = 15.sp)
-            SettingRow("Complex results", "Allow complex solutions", state.complexMode) { onAction(CalculatorAction.SetComplexMode(it)) }
-            Row(Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(value = precision, onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) precision = it },
-                    label = { Text("Precision digits", fontSize = 12.sp) }, supportingText = { Text("10–1000 digits", fontSize = 10.sp) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, textStyle = TextStyle(fontSize = 14.sp), modifier = Modifier.weight(1f))
-                TextButton(onClick = { precision.toIntOrNull()?.takeIf { it in 10..1000 }?.let { onAction(CalculatorAction.SetPrecisionDigits(it)) } },
-                    enabled = (precision.toIntOrNull() ?: 0) in 10..1000) { Text("Apply", color = Blue) }
-            }
-            HorizontalDivider(Modifier.padding(bottom = 14.dp))
-            Text("Viewing window", fontSize = 15.sp)
+            if (state.is3D) {
+                Text("${if (showBounds) "▾" else "▸"} All bounds", modifier = Modifier.fillMaxWidth().clickable { showBounds = !showBounds }.padding(vertical = 8.dp), fontSize = 16.sp)
+                if (showBounds) BoundFieldPair("All", ranges[0], ranges[1],
+                    { value -> for (i in listOf(0, 2, 4)) ranges[i] = value },
+                    { value -> for (i in listOf(1, 3, 5)) ranges[i] = value })
+            } else Text("Viewing window", fontSize = 16.sp)
+            if (showBounds) {
             Text("Leave both bounds blank for the default view.", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 4.dp, bottom = 7.dp))
             repeat(if (state.is3D) 3 else 2) { axis ->
                 BoundFieldPair("${"xyz"[axis]}", ranges[axis * 2], ranges[axis * 2 + 1],
                     { ranges[axis * 2] = it }, { ranges[axis * 2 + 1] = it })
-            }
-            TextButton(onClick = { showParameters = !showParameters }, contentPadding = PaddingValues(0.dp)) {
-                Text("${if (showParameters) "▾" else "▸"} Parametric ranges", color = Blue, fontSize = 12.sp)
-            }
-            if (showParameters) repeat(3) { parameter ->
-                val index = 6 + parameter * 2
-                BoundFieldPair("${"tuv"[parameter]}", ranges[index], ranges[index + 1], { ranges[index] = it }, { ranges[index + 1] = it })
             }
             boundsError?.let { Text(it, fontSize = 11.sp, color = Color(0xFFB8532F), modifier = Modifier.padding(top = 5.dp)) }
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1191,9 +1223,62 @@ private fun SettingsSheet(state: CalculatorUiState, onDismiss: () -> Unit, onAct
                     }
                 }) { Text("Apply", fontSize = 12.sp) }
             }
-            Text("View", fontSize = 15.sp, modifier = Modifier.padding(bottom = 4.dp))
-            Text(if (state.is3D) "3D: drag to orbit; pinch to zoom. Use two fingers to pan." else "2D: drag to pan; pinch inside the graph to zoom both axes equally. Pinch along an axis to zoom only that axis. Tap a curve to inspect a point.", fontSize = 12.sp, lineHeight = 18.sp, color = Muted)
-            Spacer(Modifier.height(20.dp))
+            }
+            HorizontalDivider(Modifier.padding(vertical = 6.dp))
+            Text("${if (showMore) "▾" else "▸"} More options", modifier = Modifier.fillMaxWidth().clickable { showMore = !showMore; if (showMore) showBounds = true }.padding(vertical = 8.dp), fontSize = 16.sp)
+            if (showMore) {
+                Text("Parametric ranges", fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
+                repeat(3) { parameter ->
+                    val index = 6 + parameter * 2
+                    BoundFieldPair("${"tuv"[parameter]}", ranges[index], ranges[index + 1], { ranges[index] = it }, { ranges[index + 1] = it })
+                }
+            }
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            Text("Angle measure", fontSize = 14.sp, modifier = Modifier.padding(bottom = 6.dp))
+            SettingsSegments("Radians", "Degrees", !state.degreeMode) { onAction(CalculatorAction.SetDegreeMode(!it)) }
+            } else {
+                Text("Default result format", fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
+                SettingsSegments("Decimal", "Exact", state.defaultDecimal) { onAction(CalculatorAction.SetDefaultDecimal(it)) }
+                Text("Tap a result to switch formats. Symbolic answers stay exact.", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 5.dp))
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                KeyboardHeightControl(state.keyboardHeightScale) { onAction(CalculatorAction.SetKeyboardHeightScale(it)) }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                SettingRow("Complex mode", "Allow complex solutions", state.complexMode) { onAction(CalculatorAction.SetComplexMode(it)) }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Text("Angle measure", fontSize = 14.sp, modifier = Modifier.padding(bottom = 6.dp))
+                SettingsSegments("Radians", "Degrees", !state.degreeMode) { onAction(CalculatorAction.SetDegreeMode(!it)) }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Row(Modifier.fillMaxWidth().padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(value = precision, onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) precision = it },
+                        label = { Text("Precision digits", fontSize = 12.sp) }, supportingText = { Text("10–1000 digits", fontSize = 10.sp) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, textStyle = TextStyle(fontSize = 14.sp), modifier = Modifier.weight(1f))
+                    TextButton(onClick = { precision.toIntOrNull()?.takeIf { it in 10..1000 }?.let { onAction(CalculatorAction.SetPrecisionDigits(it)) } },
+                        enabled = (precision.toIntOrNull() ?: 0) in 10..1000) { Text("Apply", color = Blue) }
+                }
+            }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsCheck(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }, verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = checked, onCheckedChange = null, colors = CheckboxDefaults.colors(checkedColor = Blue))
+        Text(label, fontSize = 16.sp)
+    }
+}
+
+@Composable
+private fun SettingsSegments(first: String, second: String, firstSelected: Boolean, onSelect: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp)).border(1.dp, Color(0xFF999999), RoundedCornerShape(3.dp))) {
+        listOf(first to true, second to false).forEach { (label, selected) ->
+            val active = firstSelected == selected
+            Box(Modifier.weight(1f).height(42.dp).background(if (active) Color(0xFF555555) else Color.White)
+                .clickable { onSelect(selected) }, contentAlignment = Alignment.Center) {
+                Text(label, color = if (active) Color.White else Color(0xFF222222), fontSize = 16.sp)
+            }
         }
     }
 }

@@ -21,7 +21,7 @@ object PlotGeometry {
                     fun flush() {if(line.size>=4) strokes.add(PlotStroke(relation.id,relation.color,line.toFloatArray()));line=ArrayList()}
                     val parameterBounds=bounds(program.settings.tMin,program.settings.tMax,10.0)
                     val start=when(relation.kind) {PlotKind.POLAR -> 0.0;PlotKind.PARAMETRIC -> parameterBounds.first;PlotKind.X_FUNCTION -> view.bottom;else -> view.left}
-                    val end=when(relation.kind) {PlotKind.POLAR -> 2*PI;PlotKind.PARAMETRIC -> parameterBounds.second;PlotKind.X_FUNCTION -> view.top;else -> view.right}
+                    val end=when(relation.kind) {PlotKind.POLAR -> 12*PI;PlotKind.PARAMETRIC -> parameterBounds.second;PlotKind.X_FUNCTION -> view.top;else -> view.right}
                     var previousX=Double.NaN;var previousY=Double.NaN;var previousT=start
                     for(i in 0..samples) {
                         if(i%64==0 && cancelled()) return Geometry2D(strokes,fills)
@@ -156,7 +156,7 @@ object PlotGeometry {
                     for(i in 0..1200) {
                         if(i%64==0 && cancelled()) return meshes
                         val tb=bounds(program.settings.tMin,program.settings.tMax,10.0)
-                        val t=if(r.kind==PlotKind.POLAR) 2*PI*i/1200 else tb.first+(tb.second-tb.first)*i/1200
+                        val t=if(r.kind==PlotKind.POLAR) 12*PI*i/1200 else tb.first+(tb.second-tb.first)*i/1200
                         c.t=t
                         val values=r.expressions.map {it.evaluate(c)}
                         val p=if(r.kind==PlotKind.POLAR) Vec3(values[0]*cos(t),values[0]*sin(t),0.0) else Vec3(values[0],values[1],values.getOrElse(2) {0.0})

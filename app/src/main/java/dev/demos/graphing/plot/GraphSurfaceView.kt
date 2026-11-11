@@ -5,6 +5,7 @@ import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import android.view.MotionEvent
+import androidx.compose.ui.geometry.Rect
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -23,12 +24,13 @@ internal class GraphCameraState {
     var configuredBounds:List<Double?>?=null
 }
 internal class GraphSurfaceView(context:Context,camera:GraphCameraState=GraphCameraState()):GLSurfaceView(context) {
-    private val graphRenderer=SurfaceRenderer(camera)
+    private val graphRenderer=SurfaceRenderer(camera) { matrix -> post { onProjection?.invoke(matrix) } }
     private var lastX=0f;private var lastY=0f;private var previousDistance=0f
     private var downX=0f;private var downY=0f;private var downTime=0L;private var transformed=false
     private var lastMeshes:List<Mesh3D>?=null
     private var lastReset=0
     var onInspect:((String)->Unit)?=null
+    var onProjection:((FloatArray)->Unit)?=null
     init {
         setEGLContextClientVersion(3)
         setEGLConfigChooser(8,8,8,8,24,0)
@@ -45,6 +47,7 @@ internal class GraphSurfaceView(context:Context,camera:GraphCameraState=GraphCam
         requestRender()
     }
     fun zoomBy(scale:Float) {graphRenderer.distance=(graphRenderer.distance/scale).coerceIn(0.001f,1e9f);requestRender()}
+    fun setGraphBounds(bounds:Rect) { graphRenderer.setGraphBounds(bounds); requestRender() }
     fun release() {onPause()}
     override fun onTouchEvent(event:MotionEvent):Boolean {
         when(event.actionMasked) {
@@ -62,7 +65,7 @@ internal class GraphSurfaceView(context:Context,camera:GraphCameraState=GraphCam
                     if(previousDistance>1) zoomBy(distance/previousDistance)
                     previousDistance=distance
                     val x=(event.getX(0)+event.getX(1))/2;val y=(event.getY(0)+event.getY(1))/2
-                    val scale=graphRenderer.distance/max(1,height)*0.7f
+                    val scale=graphRenderer.distance/max(1f,graphRenderer.projectionHeight)*0.7f
                     val yaw=graphRenderer.yaw*PI.toFloat()/180
                     val pitch=graphRenderer.pitch*PI.toFloat()/180
                     val dx=x-lastX;val dy=y-lastY
@@ -99,7 +102,8 @@ internal class GraphSurfaceView(context:Context,camera:GraphCameraState=GraphCam
 }
 
 private data class BufferedMesh(val color:Int,val buffer:FloatBuffer,val count:Int,val primitive:Int)
-private class SurfaceRenderer(private val camera:GraphCameraState):GLSurfaceView.Renderer {
+private data class ProjectionBounds(val reference:Rect,val current:Rect)
+private class SurfaceRenderer(private val camera:GraphCameraState, private val onProjection:(FloatArray)->Unit):GLSurfaceView.Renderer {
     var yaw:Float
         get()=camera.yaw
         set(value){camera.yaw=value}
@@ -126,13 +130,23 @@ private class SurfaceRenderer(private val camera:GraphCameraState):GLSurfaceView
     private var buffered=emptyList<BufferedMesh>()
     private var axisMeshes=emptyList<BufferedMesh>()
     private var gridMesh:BufferedMesh?=null
+    private var boxMesh:BufferedMesh?=null
+    @Volatile private var sceneBounds:List<Pair<Double,Double>> = List(3) { -5.0 to 5.0 }
+    private var drawnBounds:List<Pair<Double,Double>>?=null
     private var program=0;private var mvpLocation=0;private var colorLocation=0;private var lightLocation=0
     private val projection=FloatArray(16);private val view=FloatArray(16)
     private var aspect=1f
+    @Volatile private var graphBounds:ProjectionBounds?=null
+    val projectionHeight get()=graphBounds?.reference?.height ?: 1f
     @Volatile private var latestMvp=FloatArray(16)
+    private var publishedMvp:FloatArray?=null
+    fun setGraphBounds(bounds:Rect) {
+        graphBounds=ProjectionBounds(graphBounds?.reference ?: bounds,bounds)
+    }
     fun fitBounds(settings:PlotSettings,bounds:List<Double?>) {
         fun range(a:Double?,b:Double?):Pair<Double,Double> = if(a!=null && b!=null && a.isFinite() && b.isFinite() && a<b) a to b else -5.0 to 5.0
         val x=range(settings.xMin,settings.xMax);val y=range(settings.yMin,settings.yMax);val z=range(settings.zMin,settings.zMax)
+        sceneBounds=listOf(x,y,z)
         yaw=38f;pitch=28f
         distance=(maxOf(x.second-x.first,y.second-y.first,z.second-z.first)*1.9).toFloat().coerceIn(0.001f,1e9f)
         panX=((x.first+x.second)/2).toFloat();panY=((y.first+y.second)/2).toFloat();panZ=((z.first+z.second)/2).toFloat()
@@ -140,7 +154,7 @@ private class SurfaceRenderer(private val camera:GraphCameraState):GLSurfaceView
     }
     fun setMeshes(meshes:List<Mesh3D>) {inspectionMeshes=meshes;pending=meshes}
     override fun onSurfaceCreated(gl:GL10?,config:EGLConfig?) {
-        GLES30.glClearColor(0.035f,0.055f,0.10f,1f)
+        GLES30.glClearColor(1f,1f,1f,1f)
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         val vertex="""#version 300 es
             layout(location=0) in vec3 a_position;
@@ -170,7 +184,7 @@ private class SurfaceRenderer(private val camera:GraphCameraState):GLSurfaceView
               float highlight=pow(max(dot(normal,halfVector),0.0),24.0)*0.28*u_light;
               vec3 lit=u_color.rgb*mix(1.0,diffuse,u_light)+highlight;
               float fog=smoothstep(0.25,1.0,v_depth)*0.22;
-              outColor=vec4(mix(lit,vec3(0.07,0.10,0.17),fog),u_color.a);
+              outColor=vec4(mix(lit,vec3(1.0),fog),u_color.a);
             }
         """.trimIndent()
         program=GLES30.glCreateProgram()
@@ -182,17 +196,7 @@ private class SurfaceRenderer(private val camera:GraphCameraState):GLSurfaceView
         mvpLocation=GLES30.glGetUniformLocation(program,"u_mvp")
         colorLocation=GLES30.glGetUniformLocation(program,"u_color")
         lightLocation=GLES30.glGetUniformLocation(program,"u_light")
-        axisMeshes=listOf(
-            buffer(Mesh3D(0xFFB7473F.toInt(),line(-6f,0f,0f,6f,0f,0f),Mesh3D.LINES)),
-            buffer(Mesh3D(0xFF43813F.toInt(),line(0f,-6f,0f,0f,6f,0f),Mesh3D.LINES)),
-            buffer(Mesh3D(0xFF3275B8.toInt(),line(0f,0f,-6f,0f,0f,6f),Mesh3D.LINES)),
-        )
-        val gridVertices=FloatBuilder()
-        for(i in -5..5) {
-            gridVertices.vertex(Vec3(i.toDouble(),-5.0,0.0),Vec3(0.0,0.0,1.0));gridVertices.vertex(Vec3(i.toDouble(),5.0,0.0),Vec3(0.0,0.0,1.0))
-            gridVertices.vertex(Vec3(-5.0,i.toDouble(),0.0),Vec3(0.0,0.0,1.0));gridVertices.vertex(Vec3(5.0,i.toDouble(),0.0),Vec3(0.0,0.0,1.0))
-        }
-        gridMesh=buffer(Mesh3D(0xFF53627A.toInt(),gridVertices.array(),Mesh3D.LINES))
+        drawnBounds=null
         pending=inspectionMeshes
     }
     override fun onSurfaceChanged(gl:GL10?,width:Int,height:Int) {
@@ -200,18 +204,56 @@ private class SurfaceRenderer(private val camera:GraphCameraState):GLSurfaceView
         aspect=width.toFloat()/max(1,height)
     }
     override fun onDrawFrame(gl:GL10?) {
+        val boundsForScene=sceneBounds
+        if(drawnBounds!=boundsForScene) { rebuildScene(boundsForScene); drawnBounds=boundsForScene }
         pending?.let {next -> buffered=next.filter {it.vertices.isNotEmpty()}.map(::buffer);if(pending===next)pending=null}
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
         GLES30.glUseProgram(program)
         val az=yaw*PI.toFloat()/180;val el=pitch*PI.toFloat()/180
-        Matrix.perspectiveM(projection,0,42f,aspect,(distance/10000).coerceAtLeast(0.000001f),distance*30+100)
+        val bounds=graphBounds
+        val projectionAspect=bounds?.let {it.reference.width/it.reference.height} ?: aspect
+        Matrix.perspectiveM(projection,0,42f,projectionAspect,(distance/10000).coerceAtLeast(0.000001f),distance*30+100)
+        if(bounds!=null) {
+            val reference=bounds.reference;val current=bounds.current
+            projection[0]*=reference.width/current.width
+            projection[5]*=reference.height/current.height
+            projection[8]=-2f*(reference.center.x-current.center.x)/current.width
+            projection[9]=2f*(reference.center.y-current.center.y)/current.height
+        }
         Matrix.setLookAtM(view,0,panX+distance*cos(el)*sin(az),panY-distance*cos(el)*cos(az),panZ+distance*sin(el),panX,panY,panZ,0f,0f,1f)
         val mvp=FloatArray(16);Matrix.multiplyMM(mvp,0,projection,0,view,0);latestMvp=mvp
+        if(publishedMvp?.contentEquals(mvp)!=true) {publishedMvp=mvp;onProjection(mvp)}
         GLES30.glUniformMatrix4fv(mvpLocation,1,false,mvp,0)
         GLES30.glLineWidth(1.5f)
         if(grid)gridMesh?.let {draw(it)}
         for(mesh in buffered)draw(mesh)
-        if(axes) {GLES30.glLineWidth(2.5f);for(axis in axisMeshes)draw(axis)}
+        if(axes) { boxMesh?.let {draw(it)}; GLES30.glLineWidth(2.5f);for(axis in axisMeshes)draw(axis) }
+    }
+    private fun rebuildScene(bounds:List<Pair<Double,Double>>) {
+        val (x,y,z)=bounds
+        val normal=Vec3(0.0,0.0,1.0)
+        fun FloatBuilder.segment(a:Vec3,b:Vec3) {vertex(a,normal);vertex(b,normal)}
+        val edges=FloatBuilder()
+        for(yy in listOf(y.first,y.second)) for(zz in listOf(z.first,z.second)) edges.segment(Vec3(x.first,yy,zz),Vec3(x.second,yy,zz))
+        for(xx in listOf(x.first,x.second)) for(zz in listOf(z.first,z.second)) edges.segment(Vec3(xx,y.first,zz),Vec3(xx,y.second,zz))
+        for(xx in listOf(x.first,x.second)) for(yy in listOf(y.first,y.second)) edges.segment(Vec3(xx,yy,z.first),Vec3(xx,yy,z.second))
+        boxMesh=buffer(Mesh3D(0xFFBBBBBB.toInt(),edges.array(),Mesh3D.LINES))
+        val grid=FloatBuilder()
+        if(0.0 in z.first..z.second) for(i in 0..10) {
+            val xx=x.first+(x.second-x.first)*i/10;val yy=y.first+(y.second-y.first)*i/10
+            grid.segment(Vec3(xx,y.first,0.0),Vec3(xx,y.second,0.0))
+            grid.segment(Vec3(x.first,yy,0.0),Vec3(x.second,yy,0.0))
+        }
+        gridMesh=buffer(Mesh3D(0xFFD0D0D0.toInt(),grid.array(),Mesh3D.LINES))
+        val axes=FloatBuilder()
+        axes.segment(Vec3(x.first,0.0,0.0),Vec3(x.second,0.0,0.0))
+        axes.segment(Vec3(0.0,y.first,0.0),Vec3(0.0,y.second,0.0))
+        axes.segment(Vec3(0.0,0.0,z.first),Vec3(0.0,0.0,z.second))
+        val ax=(x.second-x.first)*.04;val ay=(y.second-y.first)*.04;val az=(z.second-z.first)*.04
+        axes.segment(Vec3(x.second,0.0,0.0),Vec3(x.second-ax,ay,0.0));axes.segment(Vec3(x.second,0.0,0.0),Vec3(x.second-ax,-ay,0.0))
+        axes.segment(Vec3(0.0,y.second,0.0),Vec3(ax,y.second-ay,0.0));axes.segment(Vec3(0.0,y.second,0.0),Vec3(-ax,y.second-ay,0.0))
+        axes.segment(Vec3(0.0,0.0,z.second),Vec3(ax,0.0,z.second-az));axes.segment(Vec3(0.0,0.0,z.second),Vec3(-ax,0.0,z.second-az))
+        axisMeshes=listOf(buffer(Mesh3D(0xFF888888.toInt(),axes.array(),Mesh3D.LINES)))
     }
     private fun draw(mesh:BufferedMesh) {
         GLES30.glUniform4f(colorLocation,((mesh.color shr 16) and 255)/255f,((mesh.color shr 8) and 255)/255f,(mesh.color and 255)/255f,1f)

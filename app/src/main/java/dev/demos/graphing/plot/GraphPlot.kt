@@ -1,6 +1,7 @@
 package dev.demos.graphing.plot
 
 import android.graphics.Paint
+import android.opengl.Matrix
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -20,13 +21,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import dev.demos.graphing.data.GraphImages
@@ -59,6 +62,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     var viewHeightOverride by rememberSaveable {mutableStateOf<Double?>(null)}
     var appliedBounds by rememberSaveable {mutableStateOf<List<Double?>?>(null)}
     var size by remember {mutableStateOf(IntSize(1,1))}
+    val previousBounds = remember { arrayOfNulls<Rect>(1) }
     var trace by remember {mutableStateOf<Offset?>(null)}
     fun current2DView()=Viewport(center.x.toDouble(),center.y.toDouble(),viewWidth,viewHeightOverride?: (viewWidth*max(1,size.height)/max(1,size.width)))
     val view=current2DView()
@@ -70,6 +74,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     var geometry by remember {mutableStateOf(Geometry2D())}
     var meshes by remember {mutableStateOf(emptyList<Mesh3D>())}
     var glView by remember {mutableStateOf<GraphSurfaceView?>(null)}
+    var projection3D by remember {mutableStateOf<FloatArray?>(null)}
     val cameraState=rememberSaveable(saver=Saver<GraphCameraState,List<Double?>>(
         save={listOf(it.yaw.toDouble(),it.pitch.toDouble(),it.distance.toDouble(),it.panX.toDouble(),it.panY.toDouble(),it.panZ.toDouble()) + (it.configuredBounds?:emptyList())},
         restore={ values -> GraphCameraState().apply {
@@ -117,20 +122,65 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     val latestShowAxes by rememberUpdatedState(settings.showAxes)
     val density=LocalDensity.current.density
     val labelPaint=remember {Paint(Paint.ANTI_ALIAS_FLAG).apply {color=android.graphics.Color.BLACK}}
-    Box(modifier.background(Color.White).onSizeChanged {size=it}) {
+    Box(modifier.background(Color.White).onGloballyPositioned { coordinates ->
+        val nextSize = coordinates.size
+        if (nextSize.width > 0 && nextSize.height > 0) {
+            val origin = coordinates.positionInRoot()
+            val next = Rect(origin.x, origin.y, origin.x + nextSize.width, origin.y + nextSize.height)
+            val previous = previousBounds[0]
+            if (previous != null && previous != next) {
+                val oldView = current2DView()
+                val unitsX = oldView.width / previous.width
+                val unitsY = oldView.height / previous.height
+                center = Offset(
+                    (oldView.centerX + (next.center.x - previous.center.x) * unitsX).toFloat(),
+                    (oldView.centerY - (next.center.y - previous.center.y) * unitsY).toFloat(),
+                )
+                viewWidth = unitsX * next.width
+                if (viewHeightOverride != null) viewHeightOverride = unitsY * next.height
+            }
+            previousBounds[0] = next
+            size = nextSize
+            glView?.setGraphBounds(next)
+        }
+    }) {
         if(is3D) {
             AndroidView(
-                factory={context -> GraphSurfaceView(context,cameraState).also {surface -> glView=surface;surface.onInspect={inspectedPoint=it}}},
+                factory={context -> GraphSurfaceView(context,cameraState).also {surface ->
+                    glView=surface
+                    previousBounds[0]?.let(surface::setGraphBounds)
+                    surface.onInspect={inspectedPoint=it}
+                    surface.onProjection={projection3D=it}
+                }},
                 modifier=Modifier.fillMaxSize(),
                 update={it.update(meshes,settings,resetCounter)},
-                onRelease={it.release()},
+                onRelease={ if (glView === it) glView = null; it.release() },
             )
-            Row(Modifier.align(Alignment.BottomStart).padding(10.dp).background(Color(0xAA0B1220),RoundedCornerShape(6.dp)).padding(horizontal=8.dp,vertical=5.dp),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                BasicText("x",style=TextStyle(color=Color(0xFFBD4942),fontSize=12.sp))
-                BasicText("y",style=TextStyle(color=Color(0xFF43813F),fontSize=12.sp))
-                BasicText("z",style=TextStyle(color=Color(0xFF3275B8),fontSize=12.sp))
+            if(settings.showAxes) Canvas(Modifier.fillMaxSize()) {
+                val matrix=projection3D ?: return@Canvas
+                val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply { color=android.graphics.Color.DKGRAY; textSize=13f*density }
+                fun label(text:String,x:Float,y:Float,z:Float) {
+                    val point=FloatArray(4)
+                    Matrix.multiplyMV(point,0,matrix,0,floatArrayOf(x,y,z,1f),0)
+                    if(point[3]<=0f) return
+                    val px=(point[0]/point[3]+1f)*size.width/2f
+                    val py=(1f-point[1]/point[3])*size.height/2f
+                    if(px in 0f..size.width && py in 0f..size.height) drawContext.canvas.nativeCanvas.drawText(text,px+4f*density,py-4f*density,paint)
+                }
+                val ranges=listOf((settings.xMin ?: -5.0) to (settings.xMax ?: 5.0),
+                    (settings.yMin ?: -5.0) to (settings.yMax ?: 5.0), (settings.zMin ?: -5.0) to (settings.zMax ?: 5.0))
+                label("x",ranges[0].second.toFloat(),0f,0f);label("y",0f,ranges[1].second.toFloat(),0f);label("z",0f,0f,ranges[2].second.toFloat())
+                ranges.forEachIndexed { axis, range ->
+                    for(i in 1..4) {
+                        val value=range.first+(range.second-range.first)*i/5
+                        if(abs(value)>1e-9) {
+                            val text=String.format(Locale.US,"%.3g",value)
+                            label(text,if(axis==0)value.toFloat() else 0f,if(axis==1)value.toFloat() else 0f,if(axis==2)value.toFloat() else 0f)
+                        }
+                    }
+                }
             }
-            if(showControls) BasicText("Drag to rotate · Pinch to zoom",Modifier.align(Alignment.BottomCenter).background(Color(0xAA0B1220),RoundedCornerShape(6.dp)).padding(horizontal=8.dp,vertical=5.dp),style=TextStyle(color=Color(0xFFD5DDED),fontSize=10.sp))
+            if(showControls) BasicText("Drag to rotate · Pinch to zoom",Modifier.align(Alignment.BottomCenter).padding(8.dp),style=TextStyle(color=Color(0xFF777777),fontSize=10.sp))
             inspectedPoint?.let {BasicText(it,Modifier.align(Alignment.TopStart).padding(8.dp).background(Color.White,RoundedCornerShape(5.dp)).border(1.dp,Color(0xFFD4D4D4),RoundedCornerShape(5.dp)).padding(8.dp),style=TextStyle(color=Color(0xFF333333),fontSize=16.sp))}
         } else {
             Canvas(Modifier.fillMaxSize()

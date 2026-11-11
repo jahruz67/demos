@@ -51,7 +51,7 @@ import kotlin.math.roundToInt
 
 internal data class MathSlot(val start: Int, val end: Int, val emptyArgument: Boolean = false)
 internal fun EditableMath.slots(): List<MathSlot> = when (this) {
-    is EditableMath.Text -> listOf(MathSlot(start, end, start == end))
+    is EditableMath.Text -> listOf(MathSlot(start, end, start == end && placeholder))
     is EditableMath.Row -> children.flatMap { it.slots() }
     is EditableMath.Fraction -> listOf(MathSlot(start, start)) + top.slots() + bottom.slots() + MathSlot(end, end)
     is EditableMath.Script -> body.slots() + MathSlot(end, end)
@@ -317,7 +317,7 @@ private fun MathEditorNode(node: EditableMath, value: TextFieldValue, size: Int,
     @Composable fun entry() { MathEditorLeaf(MathSlot(node.start, node.start), value, size, owner, caret, hits) }
     @Composable fun exit() { MathEditorLeaf(MathSlot(node.end, node.end), value, size, owner, caret, hits) }
     when (node) {
-        is EditableMath.Text -> MathEditorLeaf(MathSlot(node.start, node.end, node.start == node.end), value, size, owner, caret, hits)
+        is EditableMath.Text -> MathEditorLeaf(MathSlot(node.start, node.end, node.start == node.end && node.placeholder), value, size, owner, caret, hits)
         is EditableMath.Row -> Row(verticalAlignment = Alignment.CenterVertically) { node.children.forEach { child(it) } }
         is EditableMath.Fraction -> Row(verticalAlignment = Alignment.CenterVertically) {
             entry()

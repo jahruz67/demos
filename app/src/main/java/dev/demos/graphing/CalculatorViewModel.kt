@@ -288,13 +288,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 rememberUndo(); _state.value = _state.value.copy(degreeMode = action.enabled, dirty = true); changed()
             }
             is CalculatorAction.SetGrid -> {
-                rememberUndo(); _state.value = _state.value.copy(showGrid = action.enabled, dirty = true); changed(evaluate = false)
+                rememberUndo(); _state.value = if (_state.value.is3D) _state.value.copy(showGrid3D = action.enabled, dirty = true) else _state.value.copy(showGrid = action.enabled, dirty = true); changed(evaluate = false)
             }
             is CalculatorAction.SetAxes -> {
-                rememberUndo(); _state.value = _state.value.copy(showAxes = action.enabled, dirty = true); changed(evaluate = false)
+                rememberUndo(); _state.value = if (_state.value.is3D) _state.value.copy(showAxes3D = action.enabled, dirty = true) else _state.value.copy(showAxes = action.enabled, dirty = true); changed(evaluate = false)
             }
             is CalculatorAction.SetBounds -> {
-                rememberUndo(); _state.value = _state.value.copy(bounds = action.bounds, dirty = true); changed(evaluate = false)
+                rememberUndo(); _state.value = if (_state.value.is3D) _state.value.copy(bounds3D = action.bounds, dirty = true) else _state.value.copy(bounds = action.bounds, dirty = true); changed(evaluate = false)
             }
             is CalculatorAction.SetPrecisionDigits -> {
                 rememberUndo(); _state.value = _state.value.copy(precisionDigits = action.digits.coerceIn(10, 1000), dirty = true); changed()
@@ -593,10 +593,12 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         sliderSettings = _state.value.sliderSettings,
         is3D = _state.value.is3D, degreeMode = _state.value.degreeMode,
         showGrid = _state.value.showGrid, showAxes = _state.value.showAxes,
+        showGrid3D = _state.value.showGrid3D, showAxes3D = _state.value.showAxes3D,
         parameters = mapOf("C" to integrationConstant),
         precisionDigits = _state.value.precisionDigits,
         complexMode = _state.value.complexMode,
         viewBounds = with(_state.value.bounds) { mapOf("xMin" to xMin, "xMax" to xMax, "yMin" to yMin, "yMax" to yMax, "zMin" to zMin, "zMax" to zMax, "tMin" to tMin, "tMax" to tMax, "uMin" to uMin, "uMax" to uMax, "vMin" to vMin, "vMax" to vMax).filterValues { it != null }.mapValues { it.value!! } },
+        viewBounds3D = with(_state.value.bounds3D) { mapOf("xMin" to xMin, "xMax" to xMax, "yMin" to yMin, "yMax" to yMax, "zMin" to zMin, "zMax" to zMax, "tMin" to tMin, "tMax" to tMax, "uMin" to uMin, "uMax" to uMax, "vMin" to vMin, "vMax" to vMax).filterValues { it != null }.mapValues { it.value!! } },
     )
 
     private fun applyDocument(doc: GraphDocument, dirty: Boolean = false) {
@@ -614,8 +616,11 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         nextId = maxOf(nextId, (rows.maxOfOrNull { it.id } ?: 0) + 1)
         _state.value = _state.value.copy(rows = rows, activeId = doc.activeId?.takeIf { id -> rows.any { it.id == id } } ?: rows.first().id, title = doc.title,
             is3D = doc.is3D, degreeMode = doc.degreeMode, showGrid = doc.showGrid, showAxes = doc.showAxes,
+            showGrid3D = doc.showGrid3D ?: if (doc.is3D) doc.showGrid else true,
+            showAxes3D = doc.showAxes3D ?: if (doc.is3D) doc.showAxes else true,
             precisionDigits = doc.precisionDigits, complexMode = doc.complexMode,
             bounds = with(doc.viewBounds) { GraphBounds(get("xMin"), get("xMax"), get("yMin"), get("yMax"), get("zMin"), get("zMax"), get("tMin") ?: -10.0, get("tMax") ?: 10.0, get("uMin") ?: -5.0, get("uMax") ?: 5.0, get("vMin") ?: -5.0, get("vMax") ?: 5.0) },
+            bounds3D = with(doc.viewBounds3D ?: if (doc.is3D) doc.viewBounds else emptyMap()) { GraphBounds(get("xMin"), get("xMax"), get("yMin"), get("yMax"), get("zMin"), get("zMax"), get("tMin") ?: -10.0, get("tMax") ?: 10.0, get("uMin") ?: -5.0, get("uMax") ?: 5.0, get("vMin") ?: -5.0, get("vMax") ?: 5.0) },
             dirty = dirty, canUndo = undo.isNotEmpty(), canRedo = redo.isNotEmpty(), statusMessage = null, sliderSettings = doc.sliderSettings, tableFits = emptyMap(), documentRevision = _state.value.documentRevision + 1, tableFitting = emptySet())
         updateSliders()
     }
