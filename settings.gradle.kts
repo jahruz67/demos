@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "Demos"
 include(":app")
+include(":desktop")

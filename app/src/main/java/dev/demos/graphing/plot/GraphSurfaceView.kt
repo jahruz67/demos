@@ -14,15 +14,6 @@ import javax.microedition.khronos.opengles.GL10
 import kotlin.math.*
 
 /** GLES 3 renderer, with meshing done by PlotGeometry off the render/UI threads. */
-internal class GraphCameraState {
-    @Volatile var yaw=38f
-    @Volatile var pitch=28f
-    @Volatile var distance=19f
-    @Volatile var panX=0f
-    @Volatile var panY=0f
-    @Volatile var panZ=0f
-    var configuredBounds:List<Double?>?=null
-}
 internal class GraphSurfaceView(context:Context,camera:GraphCameraState=GraphCameraState()):GLSurfaceView(context) {
     private val graphRenderer=SurfaceRenderer(camera) { matrix -> post { onProjection?.invoke(matrix) } }
     private var lastX=0f;private var lastY=0f;private var previousDistance=0f

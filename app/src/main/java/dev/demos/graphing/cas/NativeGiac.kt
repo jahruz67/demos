@@ -3,6 +3,7 @@ package dev.demos.graphing.cas
 import javagiac.giacJNI
 import dev.demos.graphing.math.MathSyntax
 
+@kotlinx.serialization.Serializable
 data class CasResult(
     val input: String,
     val exact: String,
@@ -17,8 +18,12 @@ internal object NativeGiac {
 
     @Synchronized fun load() {
         if (!loaded) {
-            System.loadLibrary("c++_shared")
-            System.loadLibrary("javagiac")
+            if (System.getProperty("os.name").startsWith("Windows")) {
+                System.load(java.io.File(requireNotNull(System.getProperty("demos.native.dir")), "javagiac.dll").absolutePath)
+            } else {
+                System.loadLibrary("c++_shared")
+                System.loadLibrary("javagiac")
+            }
             loaded = true
         }
     }

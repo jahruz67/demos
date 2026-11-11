@@ -13,12 +13,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.demos.graphing.data.GraphImages
 import dev.demos.graphing.math.StatisticalInference
 import dev.demos.graphing.math.TableEvaluation
 import kotlinx.coroutines.Dispatchers
@@ -30,11 +28,11 @@ import kotlin.math.sqrt
 internal fun ImageWorksheet(row: ExpressionRow, number: Int, selected: Boolean, onSelect: () -> Unit, onChange: (ImageData) -> Unit,
     onDelete: () -> Unit, onVisibility: () -> Unit) {
     val image = parseImageData(row.text) ?: return
-    val context = LocalContext.current.applicationContext
-    val bitmap by produceState<android.graphics.Bitmap?>(null, image.uri) { value = withContext(Dispatchers.IO) { GraphImages.decode(context, image.uri) } }
+    val loadImage = rememberImageLoader()
+    val bitmap by produceState<ImageBitmap?>(null, image.uri) { value = withContext(Dispatchers.IO) { loadImage(image.uri) } }
     ItemFrame(number, selected, "image", onSelect, onDelete) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            bitmap?.let { Image(it.asImageBitmap(), image.name, Modifier.size(54.dp).clip(MaterialTheme.shapes.small).clickable(onClick = onVisibility)) }
+            bitmap?.let { Image(it, image.name, Modifier.size(54.dp).clip(MaterialTheme.shapes.small).clickable(onClick = onVisibility)) }
             Column(Modifier.weight(1f).padding(start = 8.dp)) {
                 BasicTextField(image.name, { onChange(image.copy(name = it)) }, singleLine = true, textStyle = interfaceTextStyle(16.sp).copy(color = DemosColors.Ink), modifier = Modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) onSelect() })
                 TextButton(onClick = onVisibility, shape = MaterialTheme.shapes.small, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {

@@ -13,7 +13,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -68,7 +67,7 @@ private val functionSections = listOf(
 internal fun FunctionMenuKey(modifier: Modifier = Modifier, onTemplate: (String, Int) -> Unit, keypadTop: Int) {
     var expanded by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
-    val configuration = LocalConfiguration.current
+    val configuration = LocalAppConfiguration.current
     val density = LocalDensity.current
     val margin = with(density) { 8.dp.roundToPx() }
     val position = remember(margin, keypadTop) { FunctionMenuPosition(margin, keypadTop) }

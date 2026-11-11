@@ -65,13 +65,96 @@ jobs:
           test -n "$apk" || { echo "Universal APK was not produced" >&2; exit 1; }
           cp "$apk" "$RUNNER_TEMP/Demos-universal.apk"
 
-      - name: Publish APK to GitHub Releases
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Demos-universal-apk
+          path: ${{ runner.temp }}/Demos-universal.apk
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out commit
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up MSYS2 and the Windows Giac toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-clang-x86_64-cc
+            mingw-w64-clang-x86_64-gmp
+            mingw-w64-clang-x86_64-mpfr
+            mingw-w64-clang-x86_64-cmake
+            mingw-w64-clang-x86_64-make
+
+      - name: Build the Windows Giac JNI library
+        shell: msys2 {0}
+        run: |
+          unzip third_party/giac/giac-70507-source.zip -d "$RUNNER_TEMP/giac"
+          source_dir="$RUNNER_TEMP/giac/giac-19a710aea9d528afa272ea582f3283f242e17af3"
+          export MSYSTEM=CLANG64
+          export CC=clang CXX=clang++
+          cmake -S "$source_dir" -B "$RUNNER_TEMP/giac-build" -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/giac-build" --target javagiac --parallel 2
+          mkdir -p desktop/build/native-dist
+          cp "$RUNNER_TEMP/giac-build/javagiac.dll" desktop/build/native-dist/
+
+      - name: Build the Windows installer
+        shell: pwsh
+        run: .\gradlew.bat --no-daemon :desktop:packageMsi "-PversionCode=${{ 1000 + github.run_number }}"
+
+      - name: Collect installer and native runtime
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem desktop/build/compose/binaries/main/msi -Filter *.msi -File | Select-Object -First 1
+          if (-not $installer) { throw 'The Windows MSI was not produced.' }
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP/windows-release" -Force | Out-Null
+          Copy-Item -LiteralPath $installer.FullName -Destination "$env:RUNNER_TEMP/windows-release/Demos-setup.msi"
+          Copy-Item -LiteralPath desktop/build/native-dist/javagiac.dll -Destination "$env:RUNNER_TEMP/windows-release/javagiac.dll"
+          Copy-Item -LiteralPath third_party/giac/giac-70507-source.zip -Destination "$env:RUNNER_TEMP/windows-release/giac-70507-source.zip"
+          Compress-Archive -Path app/src/main/assets/cas/*,third_party/giac/README.md -DestinationPath "$env:RUNNER_TEMP/windows-release/third-party-notices.zip" -CompressionLevel Optimal
+
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Demos-Windows
+          path: ${{ runner.temp }}/windows-release/*
+          if-no-files-found: error
+
+  publish-release:
+    needs: [build-and-release, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Publish APK and Windows installer to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Build ${{ github.run_number }} (${{ github.sha }})
           target_commitish: ${{ github.sha }}
-          files: ${{ runner.temp }}/Demos-universal.apk
+          files: |
+            release-artifacts/Demos-universal-apk/Demos-universal.apk
+            release-artifacts/Demos-Windows/Demos-setup.msi
+            release-artifacts/Demos-Windows/javagiac.dll
+            release-artifacts/Demos-Windows/giac-70507-source.zip
+            release-artifacts/Demos-Windows/third-party-notices.zip
           fail_on_unmatched_files: true
           generate_release_notes: true
           make_latest: true
+

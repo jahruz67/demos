@@ -1,7 +1,5 @@
 package dev.demos.graphing.data
 
-import android.content.Context
-import android.util.AtomicFile
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -35,9 +33,9 @@ data class GraphDocument(
     val appearance3D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(),
 )
 
-class GraphRepository(context: Context) {
-    private val root by lazy { File(context.noBackupFilesDir, "graphs").apply { mkdirs() } }
-    private val recovery by lazy { File(context.noBackupFilesDir, "recovery.json") }
+class GraphRepository(private val directory: File) {
+    private val root by lazy { File(directory, "graphs").apply { check(mkdirs() || isDirectory) } }
+    private val recovery by lazy { File(directory, "recovery.json") }
     private val json by lazy { Json { ignoreUnknownKeys = true; prettyPrint = true } }
     private val validId = Regex("[0-9a-fA-F-]{36}")
 
@@ -102,14 +100,17 @@ class GraphRepository(context: Context) {
     }
 
     private fun atomicWrite(file: File, contents: String) {
-        val atomic = AtomicFile(file)
-        val stream = atomic.startWrite()
+        check(file.parentFile.mkdirs() || file.parentFile.isDirectory)
+        val temporary = File.createTempFile(".${file.name}-", ".tmp", file.parentFile)
         try {
-            stream.write(contents.toByteArray(Charsets.UTF_8))
-            atomic.finishWrite(stream)
-        } catch (error: Throwable) {
-            atomic.failWrite(stream)
-            throw error
+            java.io.FileOutputStream(temporary).use { stream ->
+                stream.write(contents.toByteArray(Charsets.UTF_8))
+                stream.fd.sync()
+            }
+            java.nio.file.Files.move(temporary.toPath(), file.toPath(),
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            temporary.delete()
         }
     }
 }

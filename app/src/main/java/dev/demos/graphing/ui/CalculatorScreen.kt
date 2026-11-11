@@ -3,12 +3,6 @@
 
 package dev.demos.graphing.ui
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.res.Configuration
-import android.speech.tts.TextToSpeech
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -55,8 +49,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -130,7 +122,7 @@ fun CalculatorScreen(
     var appendRequested by remember { mutableStateOf(false) }
     var tableEditing by remember { mutableStateOf<TableCellSelection?>(null) }
     var tableValue by remember { mutableStateOf(TextFieldValue()) }
-    val configuration = LocalConfiguration.current
+    val configuration = LocalAppConfiguration.current
     val density = LocalDensity.current
     var measuredKeypadHeight by remember(configuration.screenWidthDp, configuration.screenHeightDp) { mutableStateOf(0.dp) }
     var reservedKeypadHeight by remember(configuration.screenWidthDp, configuration.screenHeightDp) { mutableStateOf(0.dp) }
@@ -138,9 +130,7 @@ fun CalculatorScreen(
     var tableExportId by remember { mutableStateOf<Long?>(null) }
     var showGraphExport by remember { mutableStateOf(false) }
     val graphState = rememberSaveableStateHolder()
-    val context = LocalContext.current
-    var speech by remember { mutableStateOf<TextToSpeech?>(null) }
-    DisposableEffect(Unit) { onDispose { speech?.shutdown() } }
+    val platform = rememberUiActions()
     val focusRequester = remember { FocusRequester() }
     val messages = remember { SnackbarHostState() }
     val currentRow = state.rows.firstOrNull { it.id == state.activeId }
@@ -179,8 +169,8 @@ fun CalculatorScreen(
         }
     }
     LaunchedEffect(state.statusMessage) { state.statusMessage?.let { messages.showSnackbar(it) } }
-    BackHandler(enabled = !keyboardVisible && state.layout != CalculatorLayout.Split) { onAction(CalculatorAction.SetLayout(CalculatorLayout.Split)) }
-    BackHandler(enabled = keyboardVisible && !showMenu && !showSave && !showLibrary && !showSettings && !showHelp) { setKeyboardVisible(false) }
+    PlatformBackHandler(enabled = !keyboardVisible && state.layout != CalculatorLayout.Split) { onAction(CalculatorAction.SetLayout(CalculatorLayout.Split)) }
+    PlatformBackHandler(enabled = keyboardVisible && !showMenu && !showSave && !showLibrary && !showSettings && !showHelp) { setKeyboardVisible(false) }
 
     fun editorValue(row: ExpressionRow): TextFieldValue = editorValues[row.id]
         ?.takeIf { it.text == row.text } ?: TextFieldValue(row.text, TextRange(row.text.length))
@@ -210,7 +200,7 @@ fun CalculatorScreen(
             tableEditing = cell
         }
         onAction(CalculatorAction.SelectRow(cell.id))
-        setKeyboardVisible(true)
+        if (platform.showKeypadOnInput) setKeyboardVisible(true)
     }
 
     fun updateTableInput(cell: TableCellSelection, value: TextFieldValue) {
@@ -315,23 +305,11 @@ fun CalculatorScreen(
             "≤" -> edit("<=")
             "≥" -> edit(">=")
             "paste" -> {
-                val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                manager.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()?.let { edit(it) }
+                platform.readClipboard()?.let { edit(it) }
             }
             "speak" -> currentRow?.let { row ->
                 val utterance = row.text + if (row.result.isNotBlank()) " equals ${row.result}" else ""
-                val currentSpeech = speech
-                if (currentSpeech != null) {
-                    currentSpeech.speak(utterance, TextToSpeech.QUEUE_FLUSH, null, "expression-${row.id}")
-                } else {
-                    var newSpeech: TextToSpeech? = null
-                    newSpeech = TextToSpeech(context.applicationContext) { status ->
-                        if (status == TextToSpeech.SUCCESS) {
-                            newSpeech?.speak(utterance, TextToSpeech.QUEUE_FLUSH, null, "expression-${row.id}")
-                        }
-                    }
-                    speech = newSpeech
-                }
+                platform.speak(utterance)
             }
             else -> edit(label)
         }
@@ -392,7 +370,7 @@ fun CalculatorScreen(
             val portraitGraphHeight = (resizedGraphHeightDp?.dp
                 ?: ((fullPanelHeight - reservedKeypadHeight) * .5f))
                 .coerceIn(minimumGraphHeight, maximumGraphHeight)
-            val landscape = availableWidth >= 600.dp && (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE || availableWidth >= 840.dp)
+            val landscape = availableWidth >= 600.dp && (LocalAppConfiguration.current.orientation == AppConfiguration.ORIENTATION_LANDSCAPE || availableWidth >= 840.dp)
             val splitDragState = rememberDraggableState { delta ->
                 // Start from the visible height so resizing remains responsive at either limit.
                 // Store the requested height separately so opening the keypad only clamps it
@@ -426,9 +404,9 @@ fun CalculatorScreen(
                     onInsert = { kind ->
                         tableEditing = null; showAddMenu = false
                         when (kind) {
-                            "expression" -> { onAction(CalculatorAction.AddItem("")); setKeyboardVisible(true) }
+                            "expression" -> { onAction(CalculatorAction.AddItem("")); if (platform.showKeypadOnInput) setKeyboardVisible(true) }
                             "note" -> { onAction(CalculatorAction.AddItem(encodeNoteText(""))); setKeyboardVisible(false) }
-                            "table" -> { onAction(CalculatorAction.AddItem(encodeTableData(TableData(emptyList(), emptyList())))); setKeyboardVisible(true) }
+                            "table" -> { onAction(CalculatorAction.AddItem(encodeTableData(TableData(emptyList(), emptyList())))); if (platform.showKeypadOnInput) setKeyboardVisible(true) }
                             "folder" -> { onAction(CalculatorAction.AddItem(encodeFolderData(FolderData("")))); setKeyboardVisible(false) }
                             "image" -> onAction(CalculatorAction.ImportImage)
                             "inference" -> { onAction(CalculatorAction.AddItem(encodeInferenceData(InferenceData()))); setKeyboardVisible(false) }
@@ -511,7 +489,7 @@ fun CalculatorScreen(
                                                         val px = maxOf(1.0, (xMax - xMin) * .2); val py = maxOf(1.0, (yMax - yMin) * .2)
                                                         onAction(CalculatorAction.SetBounds(state.bounds.copy(xMin = xMin - px, xMax = xMax + px, yMin = yMin - py, yMax = yMax + py)))
                                                     }
-                                                } else { tableEditing = null; onAction(CalculatorAction.AddItem(source)); setKeyboardVisible(true) }
+                                                } else { tableEditing = null; onAction(CalculatorAction.AddItem(source)); if (platform.showKeypadOnInput) setKeyboardVisible(true) }
                                             })
                                         parseImageData(row.text) != null -> ImageWorksheet(row, index + 1, row.id == state.activeId,
                                             onSelect = { tableEditing = null; onAction(CalculatorAction.SelectRow(row.id)); setKeyboardVisible(false) },
@@ -530,7 +508,7 @@ fun CalculatorScreen(
                                                 textInputFocused = focused
                                                 if (focused) onAction(CalculatorAction.SelectRow(row.id))
                                             },
-                                            onSelect = { tableEditing = null; onAction(CalculatorAction.SelectRow(row.id)); setKeyboardVisible(true) },
+                                            onSelect = { tableEditing = null; onAction(CalculatorAction.SelectRow(row.id)); if (platform.showKeypadOnInput) setKeyboardVisible(true) },
                                             onDelete = { onAction(CalculatorAction.DeleteRow(row.id)) },
                                             onVisibility = { onAction(CalculatorAction.ToggleVisibility(row.id)) }, onColor = { colorEditor = row },
                                             slider = state.sliders.firstOrNull { slider -> runCatching { dev.demos.graphing.math.MathSyntax.definition(row.text)?.name == slider.name }.getOrDefault(false) },
@@ -545,7 +523,7 @@ fun CalculatorScreen(
                             }
                             item {
                                 Row(Modifier.fillMaxWidth().height(48.dp).semantics { contentDescription = "Add expression at end" }
-                                    .clickable { tableEditing = null; appendRequested = true; onAction(CalculatorAction.AppendRow); setKeyboardVisible(true) }) {
+                                    .clickable { tableEditing = null; appendRequested = true; onAction(CalculatorAction.AppendRow); if (platform.showKeypadOnInput) setKeyboardVisible(true) }) {
                                     Box(Modifier.width(34.dp).fillMaxHeight().background(DemosColors.Surface)) {
                                         Text("${state.rows.size + 1}", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(start = 3.dp, top = 3.dp))
                                     }
@@ -678,7 +656,7 @@ private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, v
         save = { listOf(defaultDecimal, it) },
         restore = { if (it[0] == defaultDecimal) it[1] else defaultDecimal },
     )) { mutableStateOf(defaultDecimal) }
-    val context = LocalContext.current
+    val platform = rememberUiActions()
     val hasResult = row.result.isNotBlank() || row.approximate.isNotBlank()
     val largeExpression = row.text.contains("integrate(") || row.text.contains("sum(") || row.text.contains("product(")
     val minimumHeight = if (largeExpression) 84.dp else 52.dp
@@ -746,7 +724,7 @@ private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, v
                         Box(Modifier.weight(1f, fill = false).widthIn(max = 250.dp).clip(MaterialTheme.shapes.small).background(DemosColors.Surface).border(1.dp, Border, MaterialTheme.shapes.small)
                             .semantics { contentDescription = "Result $number" }
                             .combinedClickable(onClick = { decimal = !decimal }, onLongClick = {
-                                (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Result", result))
+                                platform.copy(result)
                             }).padding(horizontal = 8.dp, vertical = 4.dp).horizontalScroll(rememberScrollState())) {
                             MathExpression(formatResultNumber(result), 19)
                         }
@@ -867,12 +845,12 @@ private fun CalculatorKeypad(tab: String, layout: CalculatorLayout, is3D: Boolea
     val calculator = layout == CalculatorLayout.Calculator
     val first = if (calculator) "aᵇ" else "x"
     val second = if (calculator) "√" else "y"
-    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
+    val landscape = LocalAppConfiguration.current.orientation == AppConfiguration.ORIENTATION_LANDSCAPE
+    val tablet = LocalAppConfiguration.current.smallestScreenWidthDp >= 600
     // Reserve space for the worksheet on short screens, including landscape phones.
     val keyRowsHeight = if (tablet) 176f else if (tab == "ABC") (if (landscape) 186f else 210f) else if (landscape) 210f else 264f
     val spacingHeight = if (tablet) 22f else if (tab == "ABC" || landscape) 30f else 34f
-    val maximumScale = ((LocalConfiguration.current.screenHeightDp - 160f - 20f - spacingHeight) / keyRowsHeight).coerceIn(.6f, 1.4f)
+    val maximumScale = ((LocalAppConfiguration.current.screenHeightDp - 160f - 20f - spacingHeight) / keyRowsHeight).coerceIn(.6f, 1.4f)
     val keyScale = heightScale.coerceIn(.6f, 1.4f).coerceAtMost(maximumScale)
     val density = LocalDensity.current
     var dragScale by remember { mutableFloatStateOf(keyScale) }

@@ -24,7 +24,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -54,7 +53,7 @@ internal object DemosColors {
 internal fun interfaceTextStyle(size: TextUnit, weight: FontWeight = FontWeight.Normal) = TextStyle(
     fontFamily = FontFamily.SansSerif, fontWeight = weight, fontSize = size,
     lineHeight = size * 1.4f, letterSpacing = 0.sp,
-    platformStyle = PlatformTextStyle(includeFontPadding = false),
+    platformStyle = platformTextStyle(),
 )
 
 // Each math fragment needs its own line height; inherited body metrics distort roots and scripts.
@@ -97,6 +96,7 @@ private val Type = Typography(
 
 @Composable
 internal fun DemosTheme(content: @Composable () -> Unit) {
+    PlatformUi {
     MaterialTheme(
         colorScheme = Colors, typography = Type,
         shapes = Shapes(
@@ -110,6 +110,7 @@ internal fun DemosTheme(content: @Composable () -> Unit) {
             LocalTextSelectionColors provides TextSelectionColors(DemosColors.Blue, DemosColors.Blue.copy(alpha = .22f)),
             content = content,
         )
+    }
     }
 }
 

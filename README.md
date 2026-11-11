@@ -81,6 +81,6 @@ On macOS or Linux, use `./gradlew` with the same task names.
 
 ## Releases and third-party notices
 
-The GitHub Actions workflow builds a signed universal APK and publishes a GitHub Release on pushes to any branch. See [Android release setup](docs/ANDROID_RELEASES.md) for signing secrets and installation details.
+The GitHub Actions workflow builds a signed universal APK and a Windows MSI installer and publishes both on GitHub Releases on pushes to any branch. The installer runs offline and includes the native Giac symbolic engine. See [Windows desktop build and release](docs/WINDOWS.md) and [Android release setup](docs/ANDROID_RELEASES.md).
 
 See [native Giac provenance and source](third_party/giac/README.md) for bundled dependency versions, corresponding source archives, and redistribution notices. License texts and attribution are included in the app under `assets/cas`.
