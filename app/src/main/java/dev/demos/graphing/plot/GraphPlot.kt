@@ -19,6 +19,7 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -132,7 +133,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     val latestAppearance by rememberUpdatedState(settings.appearance)
     val density=LocalDensity.current.density
     val labelPaint=remember {Paint(Paint.ANTI_ALIAS_FLAG).apply {color=android.graphics.Color.BLACK}}
-    Box(modifier.background(Color.White).onGloballyPositioned { coordinates ->
+    Box(modifier.background(Color.White).clipToBounds().onGloballyPositioned { coordinates ->
         val nextSize = coordinates.size
         if (nextSize.width > 0 && nextSize.height > 0) {
             val origin = coordinates.positionInRoot()
@@ -203,7 +204,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                     BasicText("xyz"[index].toString(),style=interfaceTextStyle(12.sp).copy(color=Color(color)))
                 }
             }
-            if(showControls) BasicText("Drag to rotate · Pinch to zoom",Modifier.align(Alignment.BottomCenter).padding(8.dp),style=interfaceTextStyle(11.sp).copy(color=DemosColors.Muted))
+            if(showControls) BasicText("Drag to rotate · Pinch to zoom · Two-finger pan",Modifier.align(Alignment.BottomCenter).padding(8.dp),style=interfaceTextStyle(11.sp).copy(color=DemosColors.Muted))
             inspectedPoint?.let {BasicText(it,Modifier.align(Alignment.TopStart).padding(8.dp).background(DemosColors.Paper,RoundedCornerShape(8.dp)).border(1.dp,DemosColors.Border,RoundedCornerShape(8.dp)).padding(8.dp),style=interfaceTextStyle(16.sp).copy(color=DemosColors.Ink))}
         } else {
             Canvas(Modifier.fillMaxSize()
@@ -262,18 +263,50 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                         }
                         if(!pastSlop && !cancelled && !multiplePointers) {
                             val currentView=latestView
-                            var best=Double.POSITIVE_INFINITY
-                            var point:Offset?=null
-                            for(line in latestGeometry.strokes) {
-                                val coordinates=line.coordinates
-                                for(i in coordinates.indices step 2) {
-                                    val px=(coordinates[i]-currentView.left)/currentView.width*size.width
-                                    val py=(currentView.top-coordinates[i+1])/currentView.height*size.height
-                                    val distance=hypot(px-down.position.x,py-down.position.y)
-                                    if(distance<best && distance<36*density) {best=distance;point=Offset(coordinates[i],coordinates[i+1])}
+                            fun screenPoint(point:Offset)=Offset(
+                                ((point.x-currentView.left)/currentView.width*size.width).toFloat(),
+                                ((currentView.top-point.y)/currentView.height*size.height).toFloat(),
+                            )
+                            val intersection=latestGeometry.interests
+                                .filter {it.kind==InterestKind.INTERSECTION}
+                                .map {Offset(it.x.toFloat(),it.y.toFloat())}
+                                .minByOrNull {screenPoint(it).minus(down.position).getDistance()}
+                                ?.takeIf {screenPoint(it).minus(down.position).getDistance()<=48f*density}
+                            if(intersection!=null) {
+                                trace=intersection
+                            } else {
+                                var best=42f*density
+                                var point:Offset?=null
+                                latestGeometry.interests
+                                    .filter {it.kind!=InterestKind.INTERSECTION}
+                                    .map {Offset(it.x.toFloat(),it.y.toFloat())}
+                                    .forEach {
+                                        val distance=screenPoint(it).minus(down.position).getDistance()
+                                        if(distance<best) {best=distance;point=it}
+                                    }
+                                latestGeometry.strokes.forEach {stroke ->
+                                    val coordinates=stroke.coordinates
+                                    for(i in 0 until coordinates.size-2 step 2) {
+                                        val a=screenPoint(Offset(coordinates[i].toDouble().toFloat(),coordinates[i+1].toDouble().toFloat()))
+                                        val b=screenPoint(Offset(coordinates[i+2].toDouble().toFloat(),coordinates[i+3].toDouble().toFloat()))
+                                        val delta=b-a
+                                        val lengthSquared=delta.x*delta.x+delta.y*delta.y
+                                        val amount=if(lengthSquared>0f) {
+                                            ((down.position-a).x*delta.x+(down.position-a).y*delta.y)/lengthSquared
+                                        } else 0f
+                                        val candidate=a+delta*amount.coerceIn(0f,1f)
+                                        val distance=candidate.minus(down.position).getDistance()
+                                        if(distance<best) {
+                                            best=distance
+                                            point=Offset(
+                                                (currentView.left+candidate.x/size.width*currentView.width).toFloat(),
+                                                (currentView.top-candidate.y/size.height*currentView.height).toFloat(),
+                                            )
+                                        }
+                                    }
                                 }
+                                trace=point
                             }
-                            trace=point
                         }
                     }
                 }
