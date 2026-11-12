@@ -3,6 +3,7 @@ package dev.demos.graphing.plot
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -80,9 +81,26 @@ fun GraphPlot(expressions: List<PlotExpression>, is3D: Boolean, settings: PlotSe
     val density = LocalDensity.current.density
     val measurer = rememberTextMeasurer()
     val labels = remember(measurer, density) { PlotLabels(measurer, density) }
-    Box(modifier.background(Color.White).onSizeChanged { if (it.width > 0 && it.height > 0) { size = it; viewHeight = viewWidth * it.height / it.width } }) {
+    Box(modifier.background(Color.White).clipToBounds().onSizeChanged {
+        if (it.width > 0 && it.height > 0) { size = it; viewHeight = viewWidth * it.height / it.width }
+    }) {
         if (is3D) PlotSurface3D(meshes, settings, reset, camera, zoom3D) { trace = Offset.Zero }
-        else Canvas(Modifier.fillMaxSize().pointerInput(Unit) {
+        else Canvas(Modifier.fillMaxSize()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Scroll) {
+                            val delta = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
+                            if (delta != 0f) {
+                                transform(if (delta < 0f) 1.1f else 1f / 1.1f, Offset.Zero)
+                                event.changes.forEach { it.consume() }
+                            }
+                        }
+                    }
+                }
+            }
+            .pointerInput(Unit) {
             awaitEachGesture {
                 val down = awaitFirstDown(false)
                 var pan = Offset.Zero
@@ -96,11 +114,52 @@ fun GraphPlot(expressions: List<PlotExpression>, is3D: Boolean, settings: PlotSe
                     if (pan != Offset.Zero || zoom != 1f) { transform(zoom, pan); pan = Offset.Zero; zoom = 1f; event.changes.forEach { if (it.positionChanged()) it.consume() } }
                 }
                 val current = view()
-                val nearest = geometry.strokes.flatMap { it.coordinates.asList().chunked(2).map { pair -> Offset(pair[0], pair[1]) } }
-                    .minByOrNull { point -> Offset(((point.x - current.left) / current.width * size.width).toFloat(), ((current.top - point.y) / current.height * size.height).toFloat()).minus(down.position).getDistance() }
-                trace = nearest
+                fun screenPoint(point: Offset) = Offset(
+                    ((point.x - current.left) / current.width * size.width).toFloat(),
+                    ((current.top - point.y) / current.height * size.height).toFloat(),
+                )
+                val intersection = geometry.interests
+                    .filter { it.kind == InterestKind.INTERSECTION }
+                    .map { Offset(it.x.toFloat(), it.y.toFloat()) }
+                    .minByOrNull { screenPoint(it).minus(down.position).getDistance() }
+                    ?.takeIf { screenPoint(it).minus(down.position).getDistance() <= 48f * density }
+                if (intersection != null) {
+                    trace = intersection
+                } else {
+                    var nearest: Offset? = null
+                    var best = 42f * density
+                    geometry.interests
+                        .filter { it.kind != InterestKind.INTERSECTION }
+                        .map { Offset(it.x.toFloat(), it.y.toFloat()) }
+                        .forEach { point ->
+                            val distance = screenPoint(point).minus(down.position).getDistance()
+                            if (distance < best) { best = distance; nearest = point }
+                        }
+                    geometry.strokes.forEach { stroke ->
+                        val coordinates = stroke.coordinates
+                        for (i in 0 until coordinates.size - 2 step 2) {
+                            val a = screenPoint(Offset(coordinates[i].toDouble().toFloat(), coordinates[i + 1].toDouble().toFloat()))
+                            val b = screenPoint(Offset(coordinates[i + 2].toDouble().toFloat(), coordinates[i + 3].toDouble().toFloat()))
+                            val delta = b - a
+                            val lengthSquared = delta.x * delta.x + delta.y * delta.y
+                            val amount = if (lengthSquared > 0f) ((down.position - a).x * delta.x + (down.position - a).y * delta.y) / lengthSquared else 0f
+                            val clamped = amount.coerceIn(0f, 1f)
+                            val candidate = a + delta * clamped
+                            val distance = candidate.minus(down.position).getDistance()
+                            if (distance < best) {
+                                best = distance
+                                nearest = Offset(
+                                    (current.left + candidate.x / size.width * current.width).toFloat(),
+                                    (current.top - candidate.y / size.height * current.height).toFloat(),
+                                )
+                            }
+                        }
+                    }
+                    trace = nearest
+                }
             }
-        }) {
+            }
+        ) {
             val current = view(); val width = size.width; val height = size.height
             fun sx(x: Double) = ((axisCoordinate(x, settings.appearance.logX) - current.left) / current.width * width).toFloat()
             fun sy(y: Double) = ((current.top - axisCoordinate(y, settings.appearance.logY)) / current.height * height).toFloat()
@@ -133,7 +192,22 @@ fun GraphPlot(expressions: List<PlotExpression>, is3D: Boolean, settings: PlotSe
             trace?.takeIf { it != Offset.Zero }?.let { drawCircle(Color.Black, 5f * density, Offset(sx(it.x.toDouble()), sy(it.y.toDouble()))) }
             labels.textSize = 13f * density
             val textStep = if (settings.appearance.numbers) step else Double.POSITIVE_INFINITY
-            if (settings.showAxes && textStep.isFinite()) for (x in generateSequence(ceil(current.left / textStep) * textStep) { it + textStep }.take(60).filter { it in current.left..current.right && abs(it) > 1e-8 }) drawTextWithHalo(String.format(Locale.US, "%.3g", x), sx(x), sy(0.0) + 16 * density, labels, density)
+            if (settings.showAxes && textStep.isFinite()) {
+                val xAxisY = sy(0.0).coerceIn(14f * density, height.toFloat() - 4f * density)
+                for (x in generateSequence(ceil(current.left / textStep) * textStep) { it + textStep }.take(60)
+                    .filter { it in current.left..current.right && abs(it) > 1e-8 }) {
+                    drawTextWithHalo(String.format(Locale.US, "%.3g", x), sx(x), xAxisY + 16 * density, labels, density)
+                }
+                val yStep = niceStep(90 * density / (height / current.height))
+                val yAxisX = sx(0.0).coerceIn(4f * density, width.toFloat() - 4f * density)
+                for (y in generateSequence(ceil(current.bottom / yStep) * yStep) { it + yStep }.take(60)
+                    .filter { it in current.bottom..current.top && abs(it) > 1e-8 }) {
+                    val text = String.format(Locale.US, "%.3g", y)
+                    val labelX = (yAxisX - labels.measureText(text) - 6f * density)
+                        .coerceIn(2f * density, width.toFloat() - labels.measureText(text) - 2f * density)
+                    drawTextWithHalo(text, labelX, sy(y) + 4f * density, labels, density)
+                }
+            }
         }
         if (showControls) PlotDesktopControls(is3D,
             onZoom = { zoom -> if (is3D) zoom3D = (zoom3D * zoom).coerceIn(.01f, 100f) else transform(zoom, Offset.Zero) },
@@ -148,7 +222,8 @@ fun GraphPlot(expressions: List<PlotExpression>, is3D: Boolean, settings: PlotSe
                 androidx.compose.material3.TextButton(onClick = action, modifier = Modifier.size(42.dp).background(Color.White, RoundedCornerShape(8.dp)).border(1.dp, Color(0xFFD6DDE5), RoundedCornerShape(8.dp))) { BasicText(label, style = interfaceTextStyle(20.sp)) }
             }
         }
-        if (is3D) BasicText("Drag to rotate · Scroll to zoom", Modifier.padding(6.dp), style = interfaceTextStyle(11.sp).copy(color = DemosColors.Muted))
+        if (is3D) BasicText("Left-drag rotate · Right/middle-drag pan · Scroll zoom",
+            Modifier.padding(6.dp), style = interfaceTextStyle(11.sp).copy(color = DemosColors.Muted))
     }
 }
 

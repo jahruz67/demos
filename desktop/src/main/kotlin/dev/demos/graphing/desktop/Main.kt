@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
@@ -69,7 +70,10 @@ fun main(args: Array<String>) {
                 Box(Modifier.fillMaxSize().background(DemosColors.Header)) {
                     CalculatorScreen(current, model::onAction, showGraphControls = !capturing, onOpenLibrary = { model.loadLibrary() }) { is3D, modifier ->
                         GraphPlot(model.plotExpressions(current), is3D, graphSettings(model, current, is3D),
-                            modifier.drawWithContent { graphLayer.record { this@drawWithContent.drawContent() }; drawLayer(graphLayer) }, showControls = !capturing)
+                            modifier.clipToBounds().drawWithContent {
+                                graphLayer.record { this@drawWithContent.drawContent() }
+                                drawLayer(graphLayer)
+                            }, showControls = !capturing)
                     }
                 }
             }

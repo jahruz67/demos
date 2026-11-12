@@ -122,8 +122,7 @@ private class SurfaceRenderer(private val camera:GraphCameraState, private val o
     @Volatile private var inspectionMeshes:List<Mesh3D> = emptyList()
     private var buffered=emptyList<BufferedMesh>()
     private var axisMeshes=emptyList<BufferedMesh>()
-    private var gridMesh:BufferedMesh?=null
-    private var boxMesh:BufferedMesh?=null
+    private var planeMesh:BufferedMesh?=null
     @Volatile private var sceneBounds:List<Pair<Double,Double>> = List(3) { -5.0 to 5.0 }
     private var drawnBounds:List<Pair<Double,Double>>?=null
     private var program=0;private var mvpLocation=0;private var colorLocation=0;private var lightLocation=0
@@ -149,6 +148,8 @@ private class SurfaceRenderer(private val camera:GraphCameraState, private val o
     override fun onSurfaceCreated(gl:GL10?,config:EGLConfig?) {
         GLES30.glClearColor(1f,1f,1f,1f)
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+        GLES30.glEnable(GLES30.GL_BLEND)
+        GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
         val vertex="""#version 300 es
             layout(location=0) in vec3 a_position;
             layout(location=1) in vec3 a_normal;
@@ -229,26 +230,24 @@ private class SurfaceRenderer(private val camera:GraphCameraState, private val o
         if(publishedMvp?.contentEquals(mvp)!=true) {publishedMvp=mvp;onProjection(mvp)}
         GLES30.glUniformMatrix4fv(mvpLocation,1,false,mvp,0)
         GLES30.glLineWidth(1.5f)
-        if(grid)gridMesh?.let {draw(it)}
+        if(grid) {
+            GLES30.glDepthMask(false)
+            planeMesh?.let {draw(it)}
+            GLES30.glDepthMask(true)
+        }
         for(mesh in buffered)draw(mesh)
-        if(axes) { boxMesh?.let {draw(it)}; GLES30.glLineWidth(2.5f);for(axis in axisMeshes)draw(axis) }
+        if(axes) { GLES30.glLineWidth(1.5f);for(axis in axisMeshes)draw(axis) }
     }
     private fun rebuildScene(bounds:List<Pair<Double,Double>>) {
         val (x,y,z)=bounds
         val normal=Vec3(0.0,0.0,1.0)
         fun FloatBuilder.segment(a:Vec3,b:Vec3) {vertex(a,normal);vertex(b,normal)}
-        val edges=FloatBuilder()
-        for(yy in listOf(y.first,y.second)) for(zz in listOf(z.first,z.second)) edges.segment(Vec3(x.first,yy,zz),Vec3(x.second,yy,zz))
-        for(xx in listOf(x.first,x.second)) for(zz in listOf(z.first,z.second)) edges.segment(Vec3(xx,y.first,zz),Vec3(xx,y.second,zz))
-        for(xx in listOf(x.first,x.second)) for(yy in listOf(y.first,y.second)) edges.segment(Vec3(xx,yy,z.first),Vec3(xx,yy,z.second))
-        boxMesh=buffer(Mesh3D(0xFFBBBBBB.toInt(),edges.array(),Mesh3D.LINES))
-        val grid=FloatBuilder()
-        if(0.0 in z.first..z.second) for(i in 0..10) {
-            val xx=x.first+(x.second-x.first)*i/10;val yy=y.first+(y.second-y.first)*i/10
-            grid.segment(Vec3(xx,y.first,0.0),Vec3(xx,y.second,0.0))
-            grid.segment(Vec3(x.first,yy,0.0),Vec3(x.second,yy,0.0))
+        val plane=FloatBuilder()
+        if(0.0 in z.first..z.second) {
+            plane.triangle(Vec3(x.first,y.first,0.0),Vec3(x.second,y.first,0.0),Vec3(x.first,y.second,0.0))
+            plane.triangle(Vec3(x.second,y.first,0.0),Vec3(x.second,y.second,0.0),Vec3(x.first,y.second,0.0))
         }
-        gridMesh=buffer(Mesh3D(0xFFD0D0D0.toInt(),grid.array(),Mesh3D.LINES))
+        planeMesh=buffer(Mesh3D(graphPlaneColor,plane.array()))
         val axes=List(3) { FloatBuilder() }
         axes[0].segment(Vec3(x.first,0.0,0.0),Vec3(x.second,0.0,0.0))
         axes[1].segment(Vec3(0.0,y.first,0.0),Vec3(0.0,y.second,0.0))
@@ -260,7 +259,8 @@ private class SurfaceRenderer(private val camera:GraphCameraState, private val o
         axisMeshes=axes.mapIndexed { index, vertices -> buffer(Mesh3D(graphAxisColors[index],vertices.array(),Mesh3D.LINES)) }
     }
     private fun draw(mesh:BufferedMesh) {
-        GLES30.glUniform4f(colorLocation,((mesh.color shr 16) and 255)/255f,((mesh.color shr 8) and 255)/255f,(mesh.color and 255)/255f,1f)
+        GLES30.glUniform4f(colorLocation,((mesh.color shr 16) and 255)/255f,((mesh.color shr 8) and 255)/255f,
+            (mesh.color and 255)/255f,((mesh.color ushr 24) and 255)/255f)
         GLES30.glUniform1f(lightLocation,if(mesh.primitive==Mesh3D.TRIANGLES)1f else 0f)
         mesh.buffer.position(0)
         GLES30.glVertexAttribPointer(0,3,GLES30.GL_FLOAT,false,24,mesh.buffer)

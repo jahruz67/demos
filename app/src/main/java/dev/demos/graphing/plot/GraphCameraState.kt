@@ -7,5 +7,8 @@ internal class GraphCameraState {
     @Volatile var panX = 0f
     @Volatile var panY = 0f
     @Volatile var panZ = 0f
+    @Volatile var targetX = 0f
+    @Volatile var targetY = 0f
+    @Volatile var targetZ = 0f
     var configuredBounds: List<Double?>? = null
 }

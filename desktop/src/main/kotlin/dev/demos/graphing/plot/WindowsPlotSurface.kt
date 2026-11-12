@@ -1,7 +1,8 @@
 package dev.demos.graphing.plot
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -9,10 +10,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.layout.onSizeChanged
+import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.*
 
@@ -20,40 +24,93 @@ import kotlin.math.*
 @Composable
 internal fun PlotSurface3D(meshes: List<Mesh3D>, settings: PlotSettings, resetCounter: Int,
     cameraState: GraphCameraState, zoom: Float, onInspect: (String) -> Unit) {
-    var yaw by remember { mutableFloatStateOf(cameraState.yaw) }
-    var pitch by remember { mutableFloatStateOf(cameraState.pitch) }
-    var distance by remember { mutableFloatStateOf(cameraState.distance) }
+    var rotation by remember { mutableStateOf(Quaternion.fromEuler(38f, 28f)) }
+    var target by remember { mutableStateOf(Vec3(0.0, 0.0, 0.0)) }
+    var distance by remember { mutableFloatStateOf(19f) }
+    var zoomTarget by remember { mutableFloatStateOf(19f) }
     var previousZoom by remember { mutableFloatStateOf(1f) }
+    var viewportSize by remember { mutableStateOf(IntSize(1, 1)) }
     val currentMeshes by rememberUpdatedState(meshes)
     val currentSettings by rememberUpdatedState(settings)
+    val bounds = meshBounds(meshes, settings)
+    val currentBounds by rememberUpdatedState(bounds)
+    val currentRotation by rememberUpdatedState(rotation)
+    val currentTarget by rememberUpdatedState(target)
+    val currentDistance by rememberUpdatedState(distance)
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current.density
     val labels = remember(measurer, density) { PlotLabels(measurer, density) }
-    val bounds = listOf(settings.xMin, settings.xMax, settings.yMin, settings.yMax, settings.zMin, settings.zMax)
-    LaunchedEffect(resetCounter, bounds) {
-        if (resetCounter > 0 || cameraState.configuredBounds != bounds) {
-            yaw = 38f; pitch = 28f; distance = 19f
-            cameraState.configuredBounds = bounds
+    LaunchedEffect(resetCounter, bounds, viewportSize) {
+        if (resetCounter > 0 || cameraState.configuredBounds != bounds.asList()) {
+            target = bounds.center
+            rotation = Quaternion.fromEuler(38f, 28f)
+            distance = fitDistance(bounds, viewportSize.width.toFloat(), viewportSize.height.toFloat(), settings.appearance.perspective)
+            zoomTarget = distance
+            cameraState.configuredBounds = bounds.asList()
         }
     }
-    LaunchedEffect(zoom) { distance = (distance * previousZoom / zoom).coerceIn(2f, 200f); previousZoom = zoom }
-    SideEffect { cameraState.yaw = yaw; cameraState.pitch = pitch; cameraState.distance = distance }
+    LaunchedEffect(zoom) {
+        zoomTarget = (zoomTarget * previousZoom / zoom).coerceIn(0.01f, 1e7f)
+        previousZoom = zoom
+    }
+    LaunchedEffect(zoomTarget) {
+        val start = distance
+        val end = zoomTarget
+        repeat(12) { frame ->
+            val t = (frame + 1) / 12f
+            distance = start + (end - start) * t
+            delay(16)
+        }
+    }
+    SideEffect {
+        cameraState.targetX = target.x.toFloat()
+        cameraState.targetY = target.y.toFloat()
+        cameraState.targetZ = target.z.toFloat()
+        cameraState.distance = distance
+    }
 
-    Canvas(Modifier.fillMaxSize()
+    Canvas(Modifier.fillMaxSize().onSizeChanged { viewportSize = it }
         .pointerInput(Unit) {
-            detectDragGestures { change, drag ->
-                change.consume()
-                yaw += drag.x * .4f
-                pitch = (pitch + drag.y * .4f).coerceIn(-89f, 89f)
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                var rotate = true
+                val startRotation = currentRotation
+                val startTarget = currentTarget
+                var lastPosition = down.position
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull() ?: break
+                    if (!change.pressed) break
+                    rotate = (event.buttons.hashCode() and 1) != 0
+                    if (change.positionChanged()) {
+                        if (rotate) {
+                            val deltaX = (change.position.x - down.position.x).toDouble()
+                            val deltaY = (change.position.y - down.position.y).toDouble()
+                            val scale = 0.0065
+                            val yaw = Quaternion.fromAxis(Vec3(0.0, 0.0, 1.0), -deltaX * scale)
+                            val pitchAxis = startRotation.inverse().rotate(Vec3(1.0, 0.0, 0.0)).normalized()
+                            val pitch = Quaternion.fromAxis(pitchAxis, -deltaY * scale)
+                            rotation = (pitch * yaw * startRotation).normalized()
+                        } else {
+                            val delta = change.position - lastPosition
+                            val scale = currentDistance / minOf(size.width, size.height).coerceAtLeast(1) * .9f
+                            val cameraDelta = Vec3((-delta.x * scale).toDouble(), 0.0, (delta.y * scale).toDouble())
+                            target = startTarget + rotation.inverse().rotate(cameraDelta)
+                        }
+                        lastPosition = change.position
+                        change.consume()
+                    }
+                }
             }
         }
         .pointerInput(Unit) {
             awaitPointerEventScope {
                 while (true) {
                     val event = awaitPointerEvent()
-                    if (event.type == PointerEventType.Scroll) {
+                    if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Scroll) {
                         val delta = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
-                        distance = (distance * exp(delta * .12f)).coerceIn(2f, 200f)
+                        val factor = if (delta < 0f) 1.1f else 1f / 1.1f
+                        zoomTarget = (zoomTarget / factor).coerceIn(.01f, 1e7f)
                         event.changes.forEach { it.consume() }
                     }
                 }
@@ -61,7 +118,8 @@ internal fun PlotSurface3D(meshes: List<Mesh3D>, settings: PlotSettings, resetCo
         }
         .pointerInput(Unit) {
             detectTapGestures { tap ->
-                val projection = Projection(currentSettings, yaw, pitch, distance, size.width.toFloat(), size.height.toFloat())
+                val projection = Projection(currentSettings, currentBounds, currentRotation, currentTarget, currentDistance,
+                    size.width.toFloat(), size.height.toFloat())
                 var nearest: FloatArray? = null
                 var best = 28f * density
                 currentMeshes.forEach { mesh ->
@@ -74,7 +132,7 @@ internal fun PlotSurface3D(meshes: List<Mesh3D>, settings: PlotSettings, resetCo
                 nearest?.let { onInspect(String.format(Locale.US, "(%.4g, %.4g, %.4g)", it[0], it[1], it[2])) }
             }
         }) {
-        val projection = Projection(settings, yaw, pitch, distance, size.width, size.height)
+        val projection = Projection(settings, bounds, rotation, target, distance, size.width, size.height)
         val faces = ArrayList<Face>()
         for (mesh in meshes) {
             val points = (mesh.vertices.indices step 6).map { projection.point(mesh.vertices, it) }
@@ -88,18 +146,27 @@ internal fun PlotSurface3D(meshes: List<Mesh3D>, settings: PlotSettings, resetCo
                 Mesh3D.POINTS -> points.forEach { faces += Face(listOf(it), Color(mesh.color)) }
             }
         }
-        if (settings.showGrid) {
-            for (index in 0..10) {
-                val x = projection.xMin + (projection.xMax - projection.xMin) * index / 10
-                val y = projection.yMin + (projection.yMax - projection.yMin) * index / 10
-                faces += Face(listOf(projection.point(x, projection.yMin, 0f), projection.point(x, projection.yMax, 0f)), Color(0xFFDDDDDD))
-                faces += Face(listOf(projection.point(projection.xMin, y, 0f), projection.point(projection.xMax, y, 0f)), Color(0xFFDDDDDD))
-            }
+        if (settings.showGrid && projection.zMin <= 0f && projection.zMax >= 0f) {
+            faces += Face(listOf(
+                projection.point(projection.xMin, projection.yMin, 0f),
+                projection.point(projection.xMax, projection.yMin, 0f),
+                projection.point(projection.xMax, projection.yMax, 0f),
+                projection.point(projection.xMin, projection.yMax, 0f),
+            ), Color(graphPlaneColor), true)
         }
         if (settings.showAxes) {
             faces += Face(listOf(projection.point(projection.xMin, 0f, 0f), projection.point(projection.xMax, 0f, 0f)), Color(graphAxisColors[0]))
             faces += Face(listOf(projection.point(0f, projection.yMin, 0f), projection.point(0f, projection.yMax, 0f)), Color(graphAxisColors[1]))
             faces += Face(listOf(projection.point(0f, 0f, projection.zMin), projection.point(0f, 0f, projection.zMax)), Color(graphAxisColors[2]))
+            val arrowX = (projection.xMax - projection.xMin) * .035f
+            val arrowY = (projection.yMax - projection.yMin) * .035f
+            val arrowZ = (projection.zMax - projection.zMin) * .035f
+            faces += Face(listOf(projection.point(projection.xMax, 0f, 0f), projection.point(projection.xMax - arrowX, arrowY, 0f)), Color(graphAxisColors[0]))
+            faces += Face(listOf(projection.point(projection.xMax, 0f, 0f), projection.point(projection.xMax - arrowX, -arrowY, 0f)), Color(graphAxisColors[0]))
+            faces += Face(listOf(projection.point(0f, projection.yMax, 0f), projection.point(arrowX, projection.yMax - arrowY, 0f)), Color(graphAxisColors[1]))
+            faces += Face(listOf(projection.point(0f, projection.yMax, 0f), projection.point(-arrowX, projection.yMax - arrowY, 0f)), Color(graphAxisColors[1]))
+            faces += Face(listOf(projection.point(0f, 0f, projection.zMax), projection.point(arrowX, 0f, projection.zMax - arrowZ)), Color(graphAxisColors[2]))
+            faces += Face(listOf(projection.point(0f, 0f, projection.zMax), projection.point(-arrowX, 0f, projection.zMax - arrowZ)), Color(graphAxisColors[2]))
         }
         faces.sortByDescending { face -> face.points.sumOf { it.depth.toDouble() } / face.points.size }
         for (face in faces) {
@@ -126,9 +193,14 @@ internal fun PlotSurface3D(meshes: List<Mesh3D>, settings: PlotSettings, resetCo
                 val low = listOf(projection.xMin, projection.yMin, projection.zMin)[axis]
                 val high = listOf(projection.xMax, projection.yMax, projection.zMax)[axis]
                 if (settings.appearance.labels) label(high, names[axis])
-                if (settings.appearance.numbers) for (i in 1..4) {
-                    val value = low + (high - low) * i / 5
-                    if (abs(value) > 1e-6f) label(value, String.format(Locale.US, "%.3g", value))
+                if (settings.appearance.numbers) {
+                    val step = coordinateStep(((high - low) / 8f).toDouble()).toFloat()
+                    var value = ceil((low / step).toDouble()).toFloat() * step
+                    repeat(40) {
+                        if (value in low..high && abs(value) > 1e-6f)
+                            label(value, formatCoordinate(value.toDouble()))
+                        value += step
+                    }
                 }
             }
         }
@@ -138,24 +210,95 @@ internal fun PlotSurface3D(meshes: List<Mesh3D>, settings: PlotSettings, resetCo
 private data class ProjectedPoint(val position: Offset, val depth: Float, val visible: Boolean)
 private data class Face(val points: List<ProjectedPoint>, val color: Color, val filled: Boolean = false, val shade: Float = 1f)
 
-private class Projection(settings: PlotSettings, yaw: Float, pitch: Float, private val distance: Float,
+private data class Bounds(val min: Vec3, val max: Vec3) {
+    val center get() = (min + max) * .5
+    val radius get() = (max - center).length
+    fun asList() = listOf(min.x, max.x, min.y, max.y, min.z, max.z)
+}
+
+private fun meshBounds(meshes: List<Mesh3D>, settings: PlotSettings): Bounds {
+    var min = Vec3(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY)
+    var max = Vec3(Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY)
+    meshes.forEach { mesh ->
+        for (i in mesh.vertices.indices step 6) {
+            val p = Vec3(mesh.vertices[i].toDouble(), mesh.vertices[i + 1].toDouble(), mesh.vertices[i + 2].toDouble())
+            min = Vec3(minOf(min.x, p.x), minOf(min.y, p.y), minOf(min.z, p.z))
+            max = Vec3(maxOf(max.x, p.x), maxOf(max.y, p.y), maxOf(max.z, p.z))
+        }
+    }
+    if (!min.finite || !max.finite) {
+        min = Vec3(settings.xMin ?: -5.0, settings.yMin ?: -5.0, settings.zMin ?: -5.0)
+        max = Vec3(settings.xMax ?: 5.0, settings.yMax ?: 5.0, settings.zMax ?: 5.0)
+    }
+    return Bounds(min, max)
+}
+
+private fun fitDistance(bounds: Bounds, width: Float, height: Float, perspective: Float): Float {
+    val radius = bounds.radius.coerceAtLeast(1e-4)
+    val extent = maxOf(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z)
+        .coerceAtLeast(1e-4) / 10.0
+    val fov = Math.toRadians(55.0)
+    val viewport = minOf(width, height).coerceAtLeast(1f)
+    return (radius / extent / tan(fov / 2.0) * (1.0 + perspective) * 1.15)
+        .coerceIn(0.01, 1e7).toFloat()
+}
+
+private data class Quaternion(val w: Double, val x: Double, val y: Double, val z: Double) {
+    operator fun times(other: Quaternion) = Quaternion(
+        w * other.w - x * other.x - y * other.y - z * other.z,
+        w * other.x + x * other.w + y * other.z - z * other.y,
+        w * other.y - x * other.z + y * other.w + z * other.x,
+        w * other.z + x * other.y - y * other.x + z * other.w)
+    fun normalized(): Quaternion {
+        val length = sqrt(w * w + x * x + y * y + z * z).coerceAtLeast(1e-20)
+        return Quaternion(w / length, x / length, y / length, z / length)
+    }
+    fun inverse() = Quaternion(w, -x, -y, -z)
+    fun rotate(v: Vec3): Vec3 {
+        val p = this * Quaternion(0.0, v.x, v.y, v.z) * inverse()
+        return Vec3(p.x, p.y, p.z)
+    }
+    companion object {
+        fun fromAxis(axis: Vec3, angle: Double): Quaternion {
+            val s = sin(angle / 2.0)
+            return Quaternion(cos(angle / 2.0), axis.x * s, axis.y * s, axis.z * s)
+        }
+        fun fromEuler(yaw: Float, pitch: Float): Quaternion =
+            fromAxis(Vec3(0.0, 0.0, 1.0), Math.toRadians(yaw.toDouble())) *
+                fromAxis(Vec3(1.0, 0.0, 0.0), Math.toRadians(pitch.toDouble()))
+    }
+}
+
+private fun formatCoordinate(value: Double): String =
+    if (abs(value - value.roundToInt()) < 1e-7) value.roundToInt().toString()
+    else String.format(Locale.US, "%.3g", value)
+
+private fun coordinateStep(target: Double): Double {
+    if (!target.isFinite() || target <= 0.0) return 1.0
+    val magnitude = 10.0.pow(floor(log10(target)))
+    val normalized = target / magnitude
+    return magnitude * when {
+        normalized < 1.4 -> 1.0
+        normalized < 3.2 -> 2.0
+        normalized < 7 -> 5.0
+        else -> 10.0
+    }
+}
+
+private class Projection(settings: PlotSettings, bounds: Bounds, private val rotation: Quaternion, private val target: Vec3,
+    private val distance: Float,
     private val width: Float, private val height: Float) {
-    val xMin = (settings.xMin ?: -5.0).toFloat(); val xMax = (settings.xMax ?: 5.0).toFloat()
-    val yMin = (settings.yMin ?: -5.0).toFloat(); val yMax = (settings.yMax ?: 5.0).toFloat()
-    val zMin = (settings.zMin ?: -5.0).toFloat(); val zMax = (settings.zMax ?: 5.0).toFloat()
+    val xMin = bounds.min.x.toFloat(); val xMax = bounds.max.x.toFloat()
+    val yMin = bounds.min.y.toFloat(); val yMax = bounds.max.y.toFloat()
+    val zMin = bounds.min.z.toFloat(); val zMax = bounds.max.z.toFloat()
     private val extent = maxOf(xMax - xMin, yMax - yMin, zMax - zMin).coerceAtLeast(.0001f) / 10
-    private val cy = cos(yaw * PI / 180).toFloat(); private val sy = sin(yaw * PI / 180).toFloat()
-    private val cp = cos(pitch * PI / 180).toFloat(); private val sp = sin(pitch * PI / 180).toFloat()
     private val perspective = settings.appearance.perspective.coerceIn(0f, 2f)
     fun point(vertices: FloatArray, index: Int) = point(vertices[index], vertices[index + 1], vertices[index + 2])
     fun point(x: Float, y: Float, z: Float): ProjectedPoint {
-        val nx = (x - (xMin + xMax) / 2) / extent
-        val ny = (y - (yMin + yMax) / 2) / extent
-        val nz = (z - (zMin + zMax) / 2) / extent
-        val horizontal = cy * nx - sy * ny
-        val forward = sy * nx + cy * ny
-        val vertical = cp * nz - sp * forward
-        val depth = cp * forward + sp * nz
+        val view = rotation.rotate(Vec3(x.toDouble(), y.toDouble(), z.toDouble()) - target)
+        val horizontal = (view.x / extent).toFloat()
+        val vertical = (view.z / extent).toFloat()
+        val depth = (view.y / extent).toFloat()
         val divisor = distance + depth * perspective
         val scale = minOf(width, height) * 1.4f / divisor.coerceAtLeast(.1f)
         val position = Offset(width / 2 + horizontal * scale, height / 2 - vertical * scale)

@@ -135,7 +135,7 @@ object PlotGeometry {
             if(cancelled()) break
             when(r.kind) {
                 PlotKind.Z_SURFACE,PlotKind.XY_FIELD,PlotKind.Y_FUNCTION,PlotKind.X_FUNCTION,PlotKind.PARAMETRIC_SURFACE -> {
-                    val out=FloatBuilder();val resolution=64
+                    val out=FloatBuilder();val sectionLines=ArrayList<FloatArray>();val resolution=64
                     val s=program.settings
                     val xBounds=bounds(s.xMin,s.xMax,radius);val yBounds=bounds(s.yMin,s.yMax,radius);val zBounds=bounds(s.zMin,s.zMax,radius)
                     val uBounds=when(r.kind) {PlotKind.Y_FUNCTION,PlotKind.XY_FIELD -> xBounds;PlotKind.X_FUNCTION -> yBounds;PlotKind.PARAMETRIC_SURFACE -> bounds(s.uMin,s.uMax,radius);else -> xBounds}
@@ -154,6 +154,23 @@ object PlotGeometry {
                             PlotKind.PARAMETRIC_SURFACE -> Vec3(value,r.expressions[1].evaluate(c),r.expressions[2].evaluate(c))
                             else -> Vec3(u,v,value)
                         }
+                        val sectionCount = 11
+                        for (line in 0 until sectionCount) {
+                            val fixed = if (sectionCount == 1) 0.5 else line.toDouble() / (sectionCount - 1)
+                            val lineBuilder = FloatBuilder()
+                            for (sample in 0..resolution) {
+                                val varying = sample.toDouble() / resolution
+                                val u = uBounds.first + (uBounds.second - uBounds.first) *
+                                    if (r.kind == PlotKind.X_FUNCTION || r.kind == PlotKind.PARAMETRIC_SURFACE) varying else fixed
+                                val v = vBounds.first + (vBounds.second - vBounds.first) *
+                                    if (r.kind == PlotKind.X_FUNCTION || r.kind == PlotKind.PARAMETRIC_SURFACE) fixed else varying
+                                val p = point(u, v)
+                                if (p.finite && p.maxAbs < span * 100 && insideConfiguredBounds(p)) {
+                                    lineBuilder.vertex(p, Vec3(0.0, 0.0, 1.0))
+                                }
+                            }
+                            if (lineBuilder.size >= 12) sectionLines.add(lineBuilder.array())
+                        }
                     }
                     for(j in 0 until resolution) {
                         if(cancelled()) return meshes
@@ -164,9 +181,10 @@ object PlotGeometry {
                             if(listOf(a,b,d,e).all {it.finite && it.maxAbs<span*100 && insideConfiguredBounds(it)} && maxOf((a-b).length,(a-d).length,(b-e).length)<span*3) {out.triangle(a,b,d);out.triangle(b,e,d)}
                         }
                     }
-                    meshes.add(Mesh3D(r.color,out.array()))
+                    meshes.add(Mesh3D(graphSurfaceColor,out.array()))
+                    sectionLines.forEach { meshes.add(Mesh3D(graphSectionColor, it, Mesh3D.LINE_STRIP)) }
                 }
-                PlotKind.IMPLICIT -> meshes.add(Mesh3D(r.color,implicitMesh(program,r,radius,cancelled)))
+                PlotKind.IMPLICIT -> meshes.add(Mesh3D(graphSurfaceColor,implicitMesh(program,r,radius,cancelled)))
                 PlotKind.PARAMETRIC,PlotKind.POLAR -> {
                     var out=FloatBuilder()
                     fun flush() {if(out.size>=12) meshes.add(Mesh3D(r.color,out.array(),Mesh3D.LINE_STRIP));out=FloatBuilder()}
