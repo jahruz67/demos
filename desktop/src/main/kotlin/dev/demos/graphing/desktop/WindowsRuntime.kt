@@ -6,7 +6,7 @@ internal object WindowsRuntime {
     val dataDirectory = File(System.getenv("LOCALAPPDATA") ?: System.getProperty("user.home"), "Demos")
     val resources: File? = System.getProperty("compose.application.resources.dir")?.let(::File)
     val nativeDirectory: File get() = System.getProperty("demos.native.dir")?.let(::File)
-        ?: resources?.let { File(it, "windows/native") }
+        ?: resources?.let { File(it, "native") }
         ?: File("desktop/build/native-dist")
 
     fun workerCommand(request: File, result: File): List<String> {
