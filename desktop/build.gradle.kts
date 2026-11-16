@@ -54,7 +54,11 @@ val prepareWindowsResources by tasks.registering {
             "Build the Windows Giac DLL first; see docs/WINDOWS.md"
         }
         val resources = layout.buildDirectory.dir("appResources").get().asFile
-        copy { from(layout.buildDirectory.dir("native-dist")); into(File(resources, "windows/native")) }
+        val nativeResources = File(resources, "native")
+        copy { from(layout.buildDirectory.dir("native-dist")); into(nativeResources) }
+        check(File(nativeResources, "javagiac.dll").isFile) {
+            "The Windows Giac DLL was not staged at appResources/native/javagiac.dll"
+        }
         copy { from(rootProject.file("app/src/main/assets/cas")); into(File(resources, "common/licenses")) }
         copy { from(rootProject.file("third_party/giac")); include("README.md"); into(File(resources, "common/sources")) }
     }
