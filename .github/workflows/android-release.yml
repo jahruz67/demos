@@ -50,6 +50,14 @@ jobs:
               -dname "CN=Demos, OU=Release, O=Demos, L=City, ST=State, C=US"
           fi
           test -s "$RUNNER_TEMP/demos-release.jks"
+          if ! keytool -list \
+            -keystore "$RUNNER_TEMP/demos-release.jks" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null 2>&1; then
+            echo "Release keystore is invalid, its password is incorrect, or alias '$ANDROID_KEY_ALIAS' is missing." >&2
+            echo "Check ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, and ANDROID_KEY_ALIAS." >&2
+            exit 1
+          fi
 
       - name: Build signed universal APK
         env:
