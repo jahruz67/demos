@@ -11,7 +11,6 @@ internal data class AppConfiguration(val screenWidthDp: Int, val screenHeightDp:
 internal val LocalAppConfiguration = staticCompositionLocalOf { AppConfiguration(1280, 900) }
 
 internal interface UiActions {
-    val showKeypadOnInput: Boolean
     fun readClipboard(): String?
     fun copy(text: String)
     fun speak(text: String)

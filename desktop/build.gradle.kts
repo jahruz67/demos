@@ -1,4 +1,6 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask
+import java.util.zip.ZipFile
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
@@ -10,17 +12,31 @@ plugins {
 kotlin {
     jvmToolchain(17)
     sourceSets.main {
-        kotlin.srcDir("../app/src/main/java")
-        kotlin.exclude("**/MainActivity.kt", "**/DemosApplication.kt", "**/CalculatorViewModel.kt",
-            "**/Android*.kt", "**/GraphImages.kt", "**/GraphPlot.kt", "**/GraphSurfaceView.kt", "**/CasEngine.kt", "**/CasService.kt")
+        kotlin.srcDir("../shared/src/main/kotlin")
     }
 }
 
-// CasEngine's desktop implementation is outside the shared Android source root.
-// Keep its filename distinct from the excluded Android implementation.
 sourceSets.main {
-    java.srcDir("../app/src/main/java")
-    java.include("**/giacJNI.java")
+    java.srcDir("../shared/src/main/java")
+}
+
+tasks.named<JavaCompile>("compileJava") {
+    // The JNI bridge is tiny. Compile it in full so relocated shared sources
+    // cannot retain stale incremental source-to-class mappings.
+    options.isIncremental = false
+    outputs.upToDateWhen {
+        destinationDirectory.file("javagiac/giacJNI.class").get().asFile.isFile
+    }
+}
+
+tasks.named<Jar>("jar") {
+    doLast {
+        ZipFile(archiveFile.get().asFile).use { archive ->
+            check(archive.getEntry("javagiac/giacJNI.class") != null) {
+                "The desktop JAR is missing the Giac JNI bridge. Rebuild :desktop:compileJava."
+            }
+        }
+    }
 }
 
 dependencies {
@@ -47,6 +63,9 @@ val prepareWindowsResources by tasks.registering {
 compose.desktop {
     application {
         mainClass = "dev.demos.graphing.desktop.MainKt"
+        // Avoid a large compiler pool competing with the first Compose frame.
+        // Keep all compilation tiers available for graphing after startup.
+        jvmArgs += "-XX:CICompilerCount=2"
         nativeDistributions {
             targetFormats(TargetFormat.Msi)
             packageName = "Demos"
@@ -64,6 +83,13 @@ compose.desktop {
             }
         }
     }
+}
+
+tasks.withType<AbstractJLinkTask>().configureEach {
+    // Compose 1.10 exposes no DSL for this flag; jlink's CDS generator needs java.exe.
+    @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
+    stripNativeCommands.set(false)
+    freeArgs.add("--generate-cds-archive")
 }
 
 tasks.matching { it.name in listOf("createDistributable", "packageMsi", "run") }.configureEach {

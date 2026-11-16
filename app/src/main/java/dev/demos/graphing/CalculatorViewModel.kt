@@ -11,7 +11,7 @@ import dev.demos.graphing.ui.CalculatorUiState
 
 /** Android lifecycle owner for the calculator shared with Windows. */
 class CalculatorViewModel(application: Application) : AndroidViewModel(application) {
-    private val calculator = CalculatorController(
+    internal val calculator = CalculatorController(
         GraphRepository(application), CasEngine(application),
         AndroidCalculatorPreferences(application), viewModelScope,
     )

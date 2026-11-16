@@ -48,6 +48,9 @@ android {
     }
     kotlin { jvmToolchain(17) }
     buildFeatures { compose = true }
+    sourceSets.getByName("main") {
+        java.srcDirs("../shared/src/main/kotlin", "../shared/src/main/java")
+    }
     packaging {
         resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1", "META-INF/LICENSE*", "META-INF/NOTICE*")
     }

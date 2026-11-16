@@ -45,10 +45,9 @@ class CalculatorController(
     private val engine: CasEngine,
     private val preferences: CalculatorPreferences,
     private val viewModelScope: CoroutineScope,
-    private val showKeypadOnInput: Boolean = true,
 ) {
     private val _state = MutableStateFlow(CalculatorUiState(
-        rows = listOf(newRow(1)), activeId = 1, keyboardVisible = showKeypadOnInput,
+        rows = listOf(newRow(1)), activeId = 1, keyboardVisible = true,
     ))
     val state = _state.asStateFlow()
     private val effectsChannel = Channel<CalculatorEffect>(Channel.BUFFERED)
@@ -228,7 +227,7 @@ class CalculatorController(
             }
             is CalculatorAction.SetLayout -> {
                 val showKeyboard = when (action.layout) {
-                    CalculatorLayout.Calculator -> _state.value.keyboardVisible || showKeypadOnInput
+                    CalculatorLayout.Calculator -> true
                     CalculatorLayout.Graph -> false
                     CalculatorLayout.Split -> _state.value.keyboardVisible
                 }

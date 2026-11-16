@@ -7,21 +7,15 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
-import android.opengl.GLSurfaceView
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
-import android.view.View
-import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.LaunchedEffect
@@ -38,13 +32,10 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import dev.demos.graphing.plot.GraphPlot
-import dev.demos.graphing.plot.PlotSettings
 import dev.demos.graphing.data.GraphImages
-import dev.demos.graphing.ui.CalculatorScreen
+import dev.demos.graphing.plot.GraphRenderState
+import dev.demos.graphing.ui.CalculatorApp
 import dev.demos.graphing.ui.CalculatorLayout
-import dev.demos.graphing.ui.DemosColors
-import dev.demos.graphing.ui.DemosTheme
 import dev.demos.graphing.ui.GraphExportFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -58,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private var pendingExport: String? = null
     private var graphBounds = Rect()
     private var capturing by mutableStateOf(false)
+    private val graphRendering = GraphRenderState()
     private var pendingFile: File? = null
     private var exportKind = "Graph"
 
@@ -159,34 +151,12 @@ class MainActivity : ComponentActivity() {
                     else hide(WindowInsetsCompat.Type.systemBars())
                 }
             }
-            DemosTheme {
-                Box(Modifier.fillMaxSize().background(DemosColors.Header).windowInsetsPadding(WindowInsets.safeDrawing)) {
-                    CalculatorScreen(current, model::onAction, showGraphControls = !capturing, onOpenLibrary = { model.loadLibrary() }) { is3D, modifier ->
-                        GraphPlot(
-                            expressions = model.plotExpressions(current),
-                            is3D = is3D,
-                            showControls = !capturing,
-                            settings = PlotSettings(
-                                showAxes = if (is3D) current.showAxes3D else current.showAxes,
-                                showGrid = if (is3D) current.showGrid3D else current.showGrid,
-                                appearance = if (is3D) current.appearance3D else current.appearance2D,
-                                radians = !current.degreeMode,
-                                parameters = model.plotParameters(current),
-                                xMin = (if (is3D) current.bounds3D else current.bounds).xMin, xMax = (if (is3D) current.bounds3D else current.bounds).xMax,
-                                yMin = (if (is3D) current.bounds3D else current.bounds).yMin, yMax = (if (is3D) current.bounds3D else current.bounds).yMax,
-                                zMin = (if (is3D) current.bounds3D else current.bounds).zMin, zMax = (if (is3D) current.bounds3D else current.bounds).zMax,
-                                tMin = (if (is3D) current.bounds3D else current.bounds).tMin, tMax = (if (is3D) current.bounds3D else current.bounds).tMax,
-                                uMin = (if (is3D) current.bounds3D else current.bounds).uMin, uMax = (if (is3D) current.bounds3D else current.bounds).uMax,
-                                vMin = (if (is3D) current.bounds3D else current.bounds).vMin, vMax = (if (is3D) current.bounds3D else current.bounds).vMax,
-                            ),
-                            modifier = modifier.onGloballyPositioned { coordinates ->
-                                val bounds = coordinates.boundsInWindow()
-                                graphBounds = Rect(bounds.left.roundToInt(), bounds.top.roundToInt(), bounds.right.roundToInt(), bounds.bottom.roundToInt())
-                            },
-                        )
-                    }
-                }
-            }
+            CalculatorApp(current, model.calculator, showGraphControls = !capturing, renderState = graphRendering,
+                modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
+                graphModifier = Modifier.onGloballyPositioned { coordinates ->
+                    val bounds = coordinates.boundsInWindow()
+                    graphBounds = Rect(bounds.left.roundToInt(), bounds.top.roundToInt(), bounds.right.roundToInt(), bounds.bottom.roundToInt())
+                })
             LaunchedEffect(Unit) {
                 model.effects.collect { effect ->
                     when (effect) {
@@ -234,20 +204,27 @@ class MainActivity : ComponentActivity() {
     private fun captureGraph(format: GraphExportFormat, share: Boolean = false) {
         if (capturing || pendingFile != null) { model.showMessage("Finish the current export first"); return }
         if (model.state.value.layout == CalculatorLayout.Calculator) { model.showMessage("Show the graph before exporting it"); return }
+        graphRendering.invalidate()
         capturing = true
         lifecycleScope.launch {
-            // Wait for graph controls to leave the captured frame.
-            awaitFrame(); awaitFrame()
-            captureGraphFrame(format, share)
+            try {
+                graphRendering.awaitReady { awaitFrame() }
+                captureGraphFrame(format, share)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                capturing = false
+                throw cancelled
+            } catch (failure: Exception) {
+                capturing = false
+                model.showMessage("Graph export failed: ${failure.message}")
+            }
         }
     }
 
     private fun captureGraphFrame(format: GraphExportFormat, share: Boolean) {
         val bounds = graphBounds
         if (bounds.width() <= 0 || bounds.height() <= 0) { capturing = false; model.showMessage("The graph is not ready to export"); return }
-        val surface = if (model.state.value.is3D) findGlSurface(window.decorView) else null
-        val width = surface?.width ?: bounds.width()
-        val height = surface?.height ?: bounds.height()
+        val width = bounds.width()
+        val height = bounds.height()
         if (width <= 0 || height <= 0) { capturing = false; model.showMessage("The graph is not ready to export"); return }
         val scale = minOf(1.0, kotlin.math.sqrt(4_000_000.0 / (width.toDouble() * height)))
         val bitmap = runCatching { Bitmap.createBitmap(maxOf(1, (width * scale).toInt()), maxOf(1, (height * scale).toInt()), Bitmap.Config.ARGB_8888) }
@@ -307,15 +284,8 @@ class MainActivity : ComponentActivity() {
             }
         }
         runCatching {
-            if (surface != null) PixelCopy.request(surface, bitmap, listener, Handler(Looper.getMainLooper()))
-            else PixelCopy.request(window, bounds, bitmap, listener, Handler(Looper.getMainLooper()))
+            PixelCopy.request(window, bounds, bitmap, listener, Handler(Looper.getMainLooper()))
         }.onFailure { capturing = false; bitmap.recycle(); model.showMessage("Graph export failed: ${it.message}") }
-    }
-
-    private fun findGlSurface(view: View): GLSurfaceView? {
-        if (view is GLSurfaceView) return view
-        if (view is ViewGroup) for (index in 0 until view.childCount) findGlSurface(view.getChildAt(index))?.let { return it }
-        return null
     }
 
     private fun readDocument(stream: InputStream, limit: Int = 5_000_000): String = stream.bufferedReader().use { reader ->

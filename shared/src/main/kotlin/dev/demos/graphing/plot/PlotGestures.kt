@@ -1,8 +1,24 @@
 package dev.demos.graphing.plot
 
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
 import kotlin.math.abs
+import kotlin.math.pow
+
+/** Preserve fractional trackpad movement and multiple wheel notches in one event. */
+internal fun plotScrollZoom(delta: Float): Float =
+    if (delta.isFinite()) 1.1.pow(-delta.toDouble()).coerceIn(1e-7, 1e7).toFloat() else 1f
+
+/** Frame-clock animation; a new gesture cancels the caller's LaunchedEffect. */
+internal suspend fun animatePlotZoom(onFrame: (Float) -> Unit) {
+    val start = withFrameNanos { it }
+    while (true) {
+        val progress = withFrameNanos { ((it - start) / 160_000_000f).coerceIn(0f, 1f) }
+        onFrame(1f - (1f - progress).pow(3))
+        if (progress >= 1f) return
+    }
+}
 
 internal enum class PlotZoomAxes { Both, X, Y }
 

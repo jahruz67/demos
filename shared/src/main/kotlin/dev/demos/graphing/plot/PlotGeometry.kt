@@ -154,22 +154,34 @@ object PlotGeometry {
                             PlotKind.PARAMETRIC_SURFACE -> Vec3(value,r.expressions[1].evaluate(c),r.expressions[2].evaluate(c))
                             else -> Vec3(u,v,value)
                         }
-                        val sectionCount = 11
+                    }
+                    // Split both families of surface contours at gaps and discontinuities.
+                    val sectionCount = 11
+                    for (alongU in listOf(true, false)) {
                         for (line in 0 until sectionCount) {
-                            val fixed = if (sectionCount == 1) 0.5 else line.toDouble() / (sectionCount - 1)
-                            val lineBuilder = FloatBuilder()
+                            if (cancelled()) return meshes
+                            val fixed = line.toDouble() / (sectionCount - 1)
+                            var lineBuilder = FloatBuilder()
+                            var previous:Vec3? = null
+                            fun flushSection() {
+                                if (lineBuilder.size >= 12) sectionLines.add(lineBuilder.array())
+                                lineBuilder = FloatBuilder()
+                            }
                             for (sample in 0..resolution) {
                                 val varying = sample.toDouble() / resolution
-                                val u = uBounds.first + (uBounds.second - uBounds.first) *
-                                    if (r.kind == PlotKind.X_FUNCTION || r.kind == PlotKind.PARAMETRIC_SURFACE) varying else fixed
-                                val v = vBounds.first + (vBounds.second - vBounds.first) *
-                                    if (r.kind == PlotKind.X_FUNCTION || r.kind == PlotKind.PARAMETRIC_SURFACE) fixed else varying
+                                val u = uBounds.first + (uBounds.second - uBounds.first) * if (alongU) varying else fixed
+                                val v = vBounds.first + (vBounds.second - vBounds.first) * if (alongU) fixed else varying
                                 val p = point(u, v)
                                 if (p.finite && p.maxAbs < span * 100 && insideConfiguredBounds(p)) {
+                                    if (previous?.let { (p-it).length >= span * 3 } == true) flushSection()
                                     lineBuilder.vertex(p, Vec3(0.0, 0.0, 1.0))
+                                    previous = p
+                                } else {
+                                    flushSection()
+                                    previous = null
                                 }
                             }
-                            if (lineBuilder.size >= 12) sectionLines.add(lineBuilder.array())
+                            flushSection()
                         }
                     }
                     for(j in 0 until resolution) {

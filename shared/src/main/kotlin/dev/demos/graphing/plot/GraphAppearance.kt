@@ -16,7 +16,7 @@ data class GraphAppearance(
     val zLabel: String = "z",
     val logX: Boolean = false,
     val logY: Boolean = false,
-    val perspective: Float = 1f,
+    val perspective: Float = 0f,
     val numbers: Boolean = true,
     val labels: Boolean = true,
 )

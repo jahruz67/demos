@@ -200,7 +200,7 @@ fun CalculatorScreen(
             tableEditing = cell
         }
         onAction(CalculatorAction.SelectRow(cell.id))
-        if (platform.showKeypadOnInput) setKeyboardVisible(true)
+        setKeyboardVisible(true)
     }
 
     fun updateTableInput(cell: TableCellSelection, value: TextFieldValue) {
@@ -404,9 +404,9 @@ fun CalculatorScreen(
                     onInsert = { kind ->
                         tableEditing = null; showAddMenu = false
                         when (kind) {
-                            "expression" -> { onAction(CalculatorAction.AddItem("")); if (platform.showKeypadOnInput) setKeyboardVisible(true) }
+                            "expression" -> { onAction(CalculatorAction.AddItem("")); setKeyboardVisible(true) }
                             "note" -> { onAction(CalculatorAction.AddItem(encodeNoteText(""))); setKeyboardVisible(false) }
-                            "table" -> { onAction(CalculatorAction.AddItem(encodeTableData(TableData(emptyList(), emptyList())))); if (platform.showKeypadOnInput) setKeyboardVisible(true) }
+                            "table" -> { onAction(CalculatorAction.AddItem(encodeTableData(TableData(emptyList(), emptyList())))); setKeyboardVisible(true) }
                             "folder" -> { onAction(CalculatorAction.AddItem(encodeFolderData(FolderData("")))); setKeyboardVisible(false) }
                             "image" -> onAction(CalculatorAction.ImportImage)
                             "inference" -> { onAction(CalculatorAction.AddItem(encodeInferenceData(InferenceData()))); setKeyboardVisible(false) }
@@ -489,7 +489,7 @@ fun CalculatorScreen(
                                                         val px = maxOf(1.0, (xMax - xMin) * .2); val py = maxOf(1.0, (yMax - yMin) * .2)
                                                         onAction(CalculatorAction.SetBounds(state.bounds.copy(xMin = xMin - px, xMax = xMax + px, yMin = yMin - py, yMax = yMax + py)))
                                                     }
-                                                } else { tableEditing = null; onAction(CalculatorAction.AddItem(source)); if (platform.showKeypadOnInput) setKeyboardVisible(true) }
+                                                } else { tableEditing = null; onAction(CalculatorAction.AddItem(source)); setKeyboardVisible(true) }
                                             })
                                         parseImageData(row.text) != null -> ImageWorksheet(row, index + 1, row.id == state.activeId,
                                             onSelect = { tableEditing = null; onAction(CalculatorAction.SelectRow(row.id)); setKeyboardVisible(false) },
@@ -508,7 +508,7 @@ fun CalculatorScreen(
                                                 textInputFocused = focused
                                                 if (focused) onAction(CalculatorAction.SelectRow(row.id))
                                             },
-                                            onSelect = { tableEditing = null; onAction(CalculatorAction.SelectRow(row.id)); if (platform.showKeypadOnInput) setKeyboardVisible(true) },
+                                            onSelect = { tableEditing = null; onAction(CalculatorAction.SelectRow(row.id)); setKeyboardVisible(true) },
                                             onDelete = { onAction(CalculatorAction.DeleteRow(row.id)) },
                                             onVisibility = { onAction(CalculatorAction.ToggleVisibility(row.id)) }, onColor = { colorEditor = row },
                                             slider = state.sliders.firstOrNull { slider -> runCatching { dev.demos.graphing.math.MathSyntax.definition(row.text)?.name == slider.name }.getOrDefault(false) },
@@ -523,7 +523,7 @@ fun CalculatorScreen(
                             }
                             item {
                                 Row(Modifier.fillMaxWidth().height(48.dp).semantics { contentDescription = "Add expression at end" }
-                                    .clickable { tableEditing = null; appendRequested = true; onAction(CalculatorAction.AppendRow); if (platform.showKeypadOnInput) setKeyboardVisible(true) }) {
+                                    .clickable { tableEditing = null; appendRequested = true; onAction(CalculatorAction.AppendRow); setKeyboardVisible(true) }) {
                                     Box(Modifier.width(34.dp).fillMaxHeight().background(DemosColors.Surface)) {
                                         Text("${state.rows.size + 1}", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(start = 3.dp, top = 3.dp))
                                     }

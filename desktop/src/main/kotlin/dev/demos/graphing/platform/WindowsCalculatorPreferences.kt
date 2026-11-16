@@ -3,7 +3,7 @@ package dev.demos.graphing.platform
 import java.util.prefs.Preferences
 
 class WindowsCalculatorPreferences : CalculatorPreferences {
-    private val preferences = Preferences.userRoot().node("dev/demos/graphing")
+    private val preferences by lazy { Preferences.userRoot().node("dev/demos/graphing") }
     override fun getString(key: String, default: String): String = preferences.get(key, default)
     override fun getBoolean(key: String, default: Boolean) = preferences.getBoolean(key, if (key == "keyboard-visible") false else default)
     override fun getFloat(key: String, default: Float) = preferences.getFloat(key, default)

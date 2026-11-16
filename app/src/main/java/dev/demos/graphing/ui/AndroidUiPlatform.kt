@@ -3,6 +3,7 @@ package dev.demos.graphing.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
 import android.speech.tts.TextToSpeech
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.*
@@ -24,6 +25,9 @@ internal fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) = BackHan
 
 internal fun platformTextStyle() = PlatformTextStyle(includeFontPadding = false)
 
+internal fun createPlotImage(width: Int, height: Int, pixels: IntArray): ImageBitmap =
+    Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888).asImageBitmap()
+
 @Composable
 internal fun rememberImageLoader(): (String) -> ImageBitmap? {
     val context = LocalContext.current.applicationContext
@@ -39,7 +43,6 @@ internal fun rememberUiActions(): UiActions {
 }
 
 private class AndroidUiActions(private val context: Context) : UiActions {
-    override val showKeypadOnInput = true
     private val clipboard get() = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     private var speech: TextToSpeech? = null
     private var ready = false

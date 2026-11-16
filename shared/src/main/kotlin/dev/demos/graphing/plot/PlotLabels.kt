@@ -7,11 +7,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Density
 
-internal class PlotLabels(private val measurer: TextMeasurer, private val density: Float) {
-    var textSize = 13f * density
-    fun layout(text: String) = measurer.measure(text, TextStyle(fontSize = (textSize / density).sp))
+internal class PlotLabels(private val measurer: TextMeasurer, private val density: Density) {
+    var textSize = 13f * density.density
+    fun layout(text: String) = measurer.measure(text, TextStyle(fontSize = with(density) { textSize.toSp() }))
     fun measureText(text: String) = layout(text).size.width.toFloat()
 }
 

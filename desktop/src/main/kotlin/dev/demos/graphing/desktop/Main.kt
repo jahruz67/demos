@@ -1,10 +1,7 @@
 package dev.demos.graphing.desktop
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
@@ -20,13 +17,10 @@ import dev.demos.graphing.cas.CasEngine
 import dev.demos.graphing.cas.runCasWorker
 import dev.demos.graphing.data.GraphRepository
 import dev.demos.graphing.platform.WindowsCalculatorPreferences
-import dev.demos.graphing.plot.GraphPlot
-import dev.demos.graphing.plot.PlotSettings
+import dev.demos.graphing.plot.GraphRenderState
 import dev.demos.graphing.ui.*
 import kotlinx.coroutines.*
-import java.awt.Dimension
 import java.io.File
-import javax.imageio.ImageIO
 
 fun main(args: Array<String>) {
     if (args.firstOrNull() == "--cas-worker") {
@@ -34,9 +28,14 @@ fun main(args: Array<String>) {
         runCasWorker(File(args[1]), File(args[2]))
         return
     }
+    StartupTrace.mark("main")
+    System.setProperty("demos.native.dir", WindowsRuntime.nativeDirectory.absolutePath)
     application {
         val scope = rememberCoroutineScope()
-        val model = remember { CalculatorController(GraphRepository(WindowsRuntime.dataDirectory), CasEngine(), WindowsCalculatorPreferences(), scope, showKeypadOnInput = false) }
+        val model = remember {
+            CalculatorController(GraphRepository(WindowsRuntime.dataDirectory), CasEngine(), WindowsCalculatorPreferences(), scope)
+                .also { StartupTrace.mark("model") }
+        }
         val current by model.state.collectAsState()
         var closing by remember { mutableStateOf(false) }
         Window(title = "${current.title} — Demos", state = rememberWindowState(width = 1080.dp, height = 760.dp),
@@ -59,24 +58,24 @@ fun main(args: Array<String>) {
                     else -> false
                 }
             }) {
-            SideEffect {
-                window.minimumSize = Dimension(760, 560)
-                System.setProperty("demos.native.dir", WindowsRuntime.nativeDirectory.absolutePath)
-            }
             DisposableEffect(model) { onDispose { model.close() } }
+            LaunchedEffect(Unit) { StartupTrace.mark("content") }
             val graphLayer = rememberGraphicsLayer()
             var capturing by remember { mutableStateOf(false) }
-            DemosTheme {
-                Box(Modifier.fillMaxSize().background(DemosColors.Header)) {
-                    CalculatorScreen(current, model::onAction, showGraphControls = !capturing, onOpenLibrary = { model.loadLibrary() }) { is3D, modifier ->
-                        GraphPlot(model.plotExpressions(current), is3D, graphSettings(model, current, is3D),
-                            modifier.clipToBounds().drawWithContent {
-                                graphLayer.record { this@drawWithContent.drawContent() }
-                                drawLayer(graphLayer)
-                            }, showControls = !capturing)
+            val graphRendering = remember { GraphRenderState() }
+            CalculatorApp(current, model, showGraphControls = !capturing, renderState = graphRendering,
+                modifier = Modifier.drawWithContent {
+                    drawContent()
+                    StartupTrace.frameDrawn()
+                },
+                graphModifier = Modifier.drawWithContent {
+                    if (capturing) {
+                        graphLayer.record { this@drawWithContent.drawContent() }
+                        drawLayer(graphLayer)
+                    } else {
+                        drawContent()
                     }
-                }
-            }
+                })
             LaunchedEffect(model) {
                 val files = WindowsFiles(window, model)
                 model.effects.collect { effect ->
@@ -89,9 +88,10 @@ fun main(args: Array<String>) {
                             CalculatorEffect.ImportImage -> files.importImage()
                             CalculatorEffect.ExportImage, is CalculatorEffect.ExportGraph -> {
                                 check(model.state.value.layout != CalculatorLayout.Calculator) { "Show the graph before exporting it" }
+                                graphRendering.invalidate()
                                 capturing = true
                                 try {
-                                    withFrameNanos { }; withFrameNanos { }
+                                    graphRendering.awaitReady { withFrameNanos { } }
                                     val image = graphLayer.toImageBitmap().toAwtImage()
                                     val format = (effect as? CalculatorEffect.ExportGraph)?.format ?: GraphExportFormat.PNG
                                     files.saveGraph(image, format)
@@ -104,15 +104,4 @@ fun main(args: Array<String>) {
             }
         }
     }
-}
-
-private fun graphSettings(model: CalculatorController, current: CalculatorUiState, is3D: Boolean): PlotSettings {
-    val bounds = if (is3D) current.bounds3D else current.bounds
-    return PlotSettings(showAxes = if (is3D) current.showAxes3D else current.showAxes,
-        showGrid = if (is3D) current.showGrid3D else current.showGrid,
-        appearance = if (is3D) current.appearance3D else current.appearance2D,
-        radians = !current.degreeMode, parameters = model.plotParameters(current),
-        xMin = bounds.xMin, xMax = bounds.xMax, yMin = bounds.yMin, yMax = bounds.yMax,
-        zMin = bounds.zMin, zMax = bounds.zMax, tMin = bounds.tMin, tMax = bounds.tMax,
-        uMin = bounds.uMin, uMax = bounds.uMax, vMin = bounds.vMin, vMax = bounds.vMax)
 }

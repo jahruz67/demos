@@ -5,11 +5,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.text.PlatformTextStyle
 import dev.demos.graphing.desktop.WindowsImages
 import java.awt.Toolkit
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
+import java.awt.image.BufferedImage
 import java.util.Base64
 
 @Composable
@@ -25,6 +27,11 @@ internal fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) = Unit
 
 internal fun platformTextStyle(): PlatformTextStyle? = null
 
+internal fun createPlotImage(width: Int, height: Int, pixels: IntArray): ImageBitmap =
+    BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB).apply {
+        setRGB(0, 0, width, height, pixels, 0, width)
+    }.toComposeImageBitmap()
+
 @Composable
 internal fun rememberImageLoader(): (String) -> ImageBitmap? = remember { { source -> WindowsImages.decode(source) } }
 
@@ -36,7 +43,6 @@ internal fun rememberUiActions(): UiActions {
 }
 
 private class WindowsUiActions : UiActions {
-    override val showKeypadOnInput = false
     private var speech: Process? = null
     private val clipboard get() = Toolkit.getDefaultToolkit().systemClipboard
     override fun readClipboard(): String? = runCatching { clipboard.getData(DataFlavor.stringFlavor) as? String }.getOrNull()

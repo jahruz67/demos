@@ -52,7 +52,7 @@ class PlotGeometryTest {
         val p=program("y√x − y² −2x +7y")
         val relation=p.relations.single()
         assertEquals(PlotKind.XY_FIELD,relation.kind)
-        val vertices=PlotGeometry.sample3D(p).single().vertices
+        val vertices=PlotGeometry.sample3D(p).first { it.primitive==Mesh3D.TRIANGLES }.vertices
         assertTrue(vertices.isNotEmpty())
         val zValues=HashSet<Float>()
         for(i in vertices.indices step 6) {
@@ -76,7 +76,7 @@ class PlotGeometryTest {
         }
     }
     @Test fun twoDimensionalRelationBecomesCylinderIn3D() {
-        val vertices=PlotGeometry.sample3D(program("y=x^2")).single().vertices
+        val vertices=PlotGeometry.sample3D(program("y=x^2")).first { it.primitive==Mesh3D.TRIANGLES }.vertices
         assertTrue(vertices.isNotEmpty())
         val zs=HashSet<Float>()
         for(i in vertices.indices step 6) {
@@ -88,7 +88,7 @@ class PlotGeometryTest {
     @Test fun parametricSurfaceAndCancellation() {
         val p=program("(u,v,u^2+v^2)")
         assertEquals(PlotKind.PARAMETRIC_SURFACE,p.relations.single().kind)
-        assertTrue(PlotGeometry.sample3D(p).single().vertices.isNotEmpty())
+        assertTrue(PlotGeometry.sample3D(p).first { it.primitive==Mesh3D.TRIANGLES }.vertices.isNotEmpty())
         assertTrue(PlotGeometry.sample3D(p,cancelled={true}).isEmpty())
     }
     @Test fun inequalityProducesShadedRegions() {
