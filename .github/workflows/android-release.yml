@@ -26,45 +26,7 @@ jobs:
         with:
           packages: "platform-tools platforms;android-36 build-tools;35.0.0"
 
-      - name: Prepare release signing key
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'android' }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || 'demos-release' }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || 'android' }}
-        run: |
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/demos-release.jks"
-          elif [ -f "release.keystore" ]; then
-            cp release.keystore "$RUNNER_TEMP/demos-release.jks"
-          else
-            echo "ANDROID_KEYSTORE_BASE64 not set; generating automated signing keystore..."
-            keytool -genkeypair -v \
-              -keystore "$RUNNER_TEMP/demos-release.jks" \
-              -alias "$ANDROID_KEY_ALIAS" \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-              -keypass "$ANDROID_KEY_PASSWORD" \
-              -dname "CN=Demos, OU=Release, O=Demos, L=City, ST=State, C=US"
-          fi
-          test -s "$RUNNER_TEMP/demos-release.jks"
-          if ! keytool -list \
-            -keystore "$RUNNER_TEMP/demos-release.jks" \
-            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-            -alias "$ANDROID_KEY_ALIAS" >/dev/null 2>&1; then
-            echo "Release keystore is invalid, its password is incorrect, or alias '$ANDROID_KEY_ALIAS' is missing." >&2
-            echo "Check ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, and ANDROID_KEY_ALIAS." >&2
-            exit 1
-          fi
-
       - name: Build signed universal APK
-        env:
-          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/demos-release.jks
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'android' }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || 'demos-release' }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || 'android' }}
         run: |
           chmod +x gradlew
           VERSION_CODE=$((1000 + ${{ github.run_number }}))
