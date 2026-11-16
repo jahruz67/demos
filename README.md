@@ -86,6 +86,6 @@ Both platform builds compile the shared sources directly and render `CalculatorA
 
 ## Releases and third-party notices
 
-The GitHub Actions workflow builds a signed universal APK and a Windows MSI installer and publishes both on GitHub Releases on pushes to any branch. The installer runs offline and includes the native Giac symbolic engine. See [Windows desktop build and release](docs/WINDOWS.md) and [Android release setup](docs/ANDROID_RELEASES.md).
+The GitHub Actions workflow builds a signed universal APK and a Windows EXE installer and publishes only those two files on GitHub Releases on pushes to any branch. The installer runs offline and includes the native Giac symbolic engine and license notices. Release notes link to the exact source revision. See [Windows desktop build and release](docs/WINDOWS.md) and [Android release setup](docs/ANDROID_RELEASES.md).
 
 See [native Giac provenance and source](third_party/giac/README.md) for bundled dependency versions, corresponding source archives, and redistribution notices. License texts and attribution are included in the app under `assets/cas`.

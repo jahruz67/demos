@@ -25,10 +25,16 @@ Copy-Item <path-to-giac-source>/build/javagiac.dll desktop/build/native-dist/jav
 Build a signed-free distributable Windows installer with:
 
 ```powershell
-.\gradlew.bat :desktop:packageMsi
+.\gradlew.bat :desktop:packageExe
 ```
 
-The MSI is written to `desktop/build/compose/binaries/main/msi/`. To distribute the native Giac DLL outside the installer too, include the corresponding source, copyright notices, and license files in the distribution. The Windows release job publishes the source archive, DLL, and GPL/LGPL notices with the installer.
+The EXE installer is written to `desktop/build/compose/binaries/main/exe/`. It includes the native Giac DLL and license notices. Releases attach only the EXE and Android APK; the release notes link to the exact repository revision containing the application and bundled native dependency sources.
+
+## Native resource packaging invariant
+
+`desktop/build.gradle.kts` defines `nativeResourceDirectory` once and supplies it to the launcher. The required pipeline is `native-dist/javagiac.dll` → `appResources/windows/native/javagiac.dll` → Compose's collected `native/javagiac.dll` → the installed `app/resources/native/javagiac.dll`. Compose selects `common/` and `windows/` and removes those prefixes; a top-level `appResources/native/` directory is ignored.
+
+`prepareWindowsResources` must finish before `prepareAppResources`. The staging task uses `Sync` to remove stale files, and `verifyWindowsResources` checks Compose's actual output against the source DLL before packaging or running. The release workflow independently installs the finished EXE on its disposable Windows runner and checks the installed relative path and SHA-256 before upload. Preserve these guards when changing packaging; checking only the staging directory cannot detect this regression. Do not hard-code a second native resource directory in the runtime.
 
 ## Startup measurement
 
@@ -45,4 +51,4 @@ The script measures launcher invocation through the first calculator draw return
 
 ## Continuous releases
 
-Every push builds both platforms. GitHub Releases contain `Demos-universal.apk`, `Demos-setup.msi`, and `javagiac.dll`; Windows source and attribution files are also attached. The Android signing setup is documented in [ANDROID_RELEASES.md](ANDROID_RELEASES.md).
+Every push builds both platforms, with superseded runs on the same branch cancelled. GitHub Releases attach only `Demos-universal.apk` and `Demos-setup.exe`. Gradle dependencies and build outputs are cached. The native DLL cache is keyed by runner OS/architecture, the pinned Giac source, and the workflow; a cache hit skips MSYS2 setup and native compilation. The DLL is cached before installer packaging so a packaging failure does not force recompilation on retry. The Android signing setup is documented in [ANDROID_RELEASES.md](ANDROID_RELEASES.md).

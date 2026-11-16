@@ -6,7 +6,11 @@ internal object WindowsRuntime {
     val dataDirectory = File(System.getenv("LOCALAPPDATA") ?: System.getProperty("user.home"), "Demos")
     val resources: File? = System.getProperty("compose.application.resources.dir")?.let(::File)
     val nativeDirectory: File get() = System.getProperty("demos.native.dir")?.let(::File)
-        ?: resources?.let { File(it, "native") }
+        ?: resources?.let {
+            File(it, requireNotNull(System.getProperty("demos.native.resource.dir")) {
+                "The launcher is missing the native resource directory configured by desktop/build.gradle.kts"
+            })
+        }
         ?: File("desktop/build/native-dist")
 
     fun workerCommand(request: File, result: File): List<String> {

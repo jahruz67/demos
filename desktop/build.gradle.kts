@@ -1,5 +1,6 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask
+import java.nio.file.Files
 import java.util.zip.ZipFile
 
 plugins {
@@ -46,21 +47,40 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
 }
 
-val prepareWindowsResources by tasks.registering {
-    dependsOn("prepareAppResources")
-    inputs.file(layout.buildDirectory.file("native-dist/javagiac.dll"))
-    doLast {
-        check(layout.buildDirectory.file("native-dist/javagiac.dll").get().asFile.isFile) {
+// Shared by resource staging, the launcher, and the packaging guard below.
+val nativeResourceDirectory = "native"
+val windowsGiacLibrary = layout.buildDirectory.file("native-dist/javagiac.dll")
+
+val prepareWindowsResources by tasks.registering(Sync::class) {
+    into(layout.buildDirectory.dir("appResources"))
+    from(layout.buildDirectory.dir("native-dist")) { into("windows/$nativeResourceDirectory") }
+    from(rootProject.file("app/src/main/assets/cas")) { into("common/licenses") }
+    from(rootProject.file("third_party/giac")) {
+        include("README.md")
+        into("common/sources")
+    }
+    doFirst {
+        check(windowsGiacLibrary.get().asFile.isFile) {
             "Build the Windows Giac DLL first; see docs/WINDOWS.md"
         }
-        val resources = layout.buildDirectory.dir("appResources").get().asFile
-        val nativeResources = File(resources, "native")
-        copy { from(layout.buildDirectory.dir("native-dist")); into(nativeResources) }
-        check(File(nativeResources, "javagiac.dll").isFile) {
-            "The Windows Giac DLL was not staged at appResources/native/javagiac.dll"
+    }
+}
+
+// Check Compose's flattened output, not our own staging directory. No declared
+// outputs: this guard must also run when resource preparation is up to date.
+val verifyWindowsResources by tasks.registering {
+    dependsOn("prepareAppResources")
+    doLast {
+        val libraries = tasks.named("prepareAppResources").get().outputs.files.asFileTree.matching {
+            include("$nativeResourceDirectory/javagiac.dll")
+        }.files
+        check(libraries.size == 1) {
+            "Compose must collect exactly one $nativeResourceDirectory/javagiac.dll. " +
+                "Stage it under appResources/windows/ before prepareAppResources; see docs/WINDOWS.md."
         }
-        copy { from(rootProject.file("app/src/main/assets/cas")); into(File(resources, "common/licenses")) }
-        copy { from(rootProject.file("third_party/giac")); include("README.md"); into(File(resources, "common/sources")) }
+        check(Files.mismatch(windowsGiacLibrary.get().asFile.toPath(), libraries.single().toPath()) == -1L) {
+            "Compose collected a stale Giac DLL. Check resource staging and task dependencies."
+        }
     }
 }
 
@@ -70,14 +90,15 @@ compose.desktop {
         // Avoid a large compiler pool competing with the first Compose frame.
         // Keep all compilation tiers available for graphing after startup.
         jvmArgs += "-XX:CICompilerCount=2"
+        jvmArgs += "-Ddemos.native.resource.dir=$nativeResourceDirectory"
         nativeDistributions {
-            targetFormats(TargetFormat.Msi)
+            targetFormats(TargetFormat.Exe)
             packageName = "Demos"
             packageVersion = "0.1.${providers.gradleProperty("versionCode").orElse("1").get()}"
             description = "Offline graphing and symbolic calculator"
             vendor = "Demos"
             modules("java.desktop", "java.prefs", "java.logging", "jdk.unsupported", "jdk.crypto.ec")
-            appResourcesRootDir.set(layout.buildDirectory.dir("appResources"))
+            appResourcesRootDir.set(layout.dir(prepareWindowsResources.map { it.destinationDir }))
             windows {
                 iconFile.set(project.file("src/main/resources/demos.ico"))
                 upgradeUuid = "53dbb66e-ef84-4f99-90d6-21cadad2d3ad"
@@ -96,6 +117,12 @@ tasks.withType<AbstractJLinkTask>().configureEach {
     freeArgs.add("--generate-cds-archive")
 }
 
-tasks.matching { it.name in listOf("createDistributable", "packageMsi", "run") }.configureEach {
+// Compose snapshots common/ and windows/ before creating the app image or installer.
+// Stage the DLL before that snapshot, including on a clean release build.
+tasks.matching { it.name == "prepareAppResources" }.configureEach {
     dependsOn(prepareWindowsResources)
+}
+
+tasks.matching { it.name in listOf("createDistributable", "packageExe", "run") }.configureEach {
+    dependsOn(verifyWindowsResources)
 }
