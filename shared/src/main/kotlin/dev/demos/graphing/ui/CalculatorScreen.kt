@@ -387,7 +387,7 @@ fun CalculatorScreen(
                 Box(modifier.onFocusChanged {graphFocused=it.hasFocus}.focusGroup()) {
                     graphState.SaveableStateProvider("graph") { graph(state.is3D, Modifier.fillMaxSize()) }
                     if (showGraphControls) {
-                        if (!state.is3D) GraphTool(IconKind.Wrench, "Graph settings", Modifier.align(Alignment.TopEnd).padding(5.dp)) { graphSettings = true; showSettings = true }
+                        GraphTool(IconKind.Wrench, "Graph settings", Modifier.align(Alignment.TopEnd).padding(5.dp)) { graphSettings = true; showSettings = true }
                         if (state.layout == CalculatorLayout.Graph) GraphTool(IconKind.Export, "Export graph", Modifier.align(Alignment.BottomEnd).padding(6.dp)) { showGraphExport = true }
                     }
                 }
@@ -1232,6 +1232,7 @@ private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDi
             SettingsCheck(if (state.is3D) "3D axes" else "Axes", if (state.is3D) state.showAxes3D else state.showAxes) { onAction(CalculatorAction.SetAxes(it)) }
             SettingsCheck("Axis numbers", appearance.numbers) { onAction(CalculatorAction.SetAppearance(appearance.copy(numbers = it))) }
             SettingsCheck("Axis labels", appearance.labels) { onAction(CalculatorAction.SetAppearance(appearance.copy(labels = it))) }
+            if (state.is3D) SettingsCheck("Reverse contrast", appearance.reverseContrast) { onAction(CalculatorAction.SetAppearance(appearance.copy(reverseContrast = it))) }
             if (appearance.labels) repeat(if (state.is3D) 3 else 2) { axis ->
                 val label = listOf(appearance.xLabel, appearance.yLabel, appearance.zLabel)[axis]
                 OutlinedTextField(label, { text ->

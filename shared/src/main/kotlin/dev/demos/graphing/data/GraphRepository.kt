@@ -32,7 +32,7 @@ data class GraphDocument(
     val showAxes3D: Boolean? = null,
     val viewBounds3D: Map<String, Double>? = null,
     val appearance2D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(),
-    val appearance3D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(xLabel="",yLabel="",zLabel=""),
+    val appearance3D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(),
 )
 
 class GraphRepository(private val directory: File) {

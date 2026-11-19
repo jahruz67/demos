@@ -48,7 +48,7 @@ private fun viewportTextStyle(size: androidx.compose.ui.unit.TextUnit) = interfa
 internal fun GeoGebraViewport3D(
     expressions: List<PlotExpression>, settings: PlotSettings, modifier: Modifier,
     showControls: Boolean, renderState: GraphRenderState, interactive: Boolean,
-    onSettingsChange: (Viewport3DSettings) -> Unit, active: Boolean = true, cameraState: GeoGebraCamera? = null,
+    onSettingsChange: (Viewport3DSettings) -> Unit, active: Boolean = true, cameraState: GeoGebraCamera? = null,showSettingsButton: Boolean = true,
 ) {
     val saved = cameraState ?: rememberGeoGebraCamera()
     val commands = remember { GeoGebraCommands() }
@@ -71,7 +71,8 @@ internal fun GeoGebraViewport3D(
                     style=viewportTextStyle(11.sp).copy(color=Color(0xFF525252)))
             }
             Column(Modifier.align(Alignment.TopEnd).padding(12.dp),horizontalAlignment=Alignment.End,verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                ViewportButton(ViewportIcon.Settings,"Graph settings",selected=settingsOpen){settingsOpen=!settingsOpen}
+                if(showSettingsButton)ViewportButton(ViewportIcon.Settings,"Graph settings",selected=settingsOpen){settingsOpen=!settingsOpen}
+                else Spacer(Modifier.size(36.dp))
                 Surface(Modifier.width(38.dp),shape=RoundedCornerShape(8.dp),color=Color.White.copy(alpha=.95f),border=BorderStroke(1.dp,ControlBorder),shadowElevation=3.dp) {
                     Column(Modifier.padding(1.dp)) {
                         ViewportButton(ViewportIcon.Plus,"Zoom in",grouped=true){setView(.75)}
@@ -82,7 +83,7 @@ internal fun GeoGebraViewport3D(
                     }
                 }
             }
-            if(settingsOpen) {
+            if(showSettingsButton && settingsOpen) {
                 Native3DSettingsCard(current,Modifier.align(Alignment.TopEnd).padding(top=174.dp,end=12.dp)
                     .requiredWidth(320.dp)
                     .heightIn(max=((maxHeight+48.dp)*.82f).coerceAtLeast(80.dp)),onChange=onSettingsChange,onClose={settingsOpen=false})

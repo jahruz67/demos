@@ -52,7 +52,7 @@ import kotlin.math.*
 @Composable
 fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSettings=PlotSettings(),modifier:Modifier=Modifier,showControls:Boolean=true,
     renderState:GraphRenderState=remember {GraphRenderState()},interactive:Boolean=true,
-    on3DSettingsChange:(Viewport3DSettings)->Unit={},camera3D:GeoGebraCamera?=null) {
+    on3DSettingsChange:(Viewport3DSettings)->Unit={},camera3D:GeoGebraCamera?=null,show3DSettingsButton:Boolean=true) {
     val views = rememberSaveableStateHolder()
     var hasMounted3D by remember { mutableStateOf(is3D) }
     if (is3D) hasMounted3D = true
@@ -62,7 +62,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
             GeoGebraViewport3D(expressions, settings,
                 Modifier.fillMaxSize().graphicsLayer { alpha = if (is3D) 1f else 0f },
                 showControls && is3D, if (is3D) renderState else dormantRendering,
-                interactive && is3D, on3DSettingsChange, active = is3D, cameraState = camera3D)
+                interactive && is3D, on3DSettingsChange, active = is3D, cameraState = camera3D,showSettingsButton=show3DSettingsButton)
         }
         }
         if (!is3D) views.SaveableStateProvider("2d") {

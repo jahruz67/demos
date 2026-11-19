@@ -110,6 +110,8 @@ internal fun GeoGebraSurface(expressions: List<PlotExpression>,settings: PlotSet
                                 dirty=true
                                 val display=next.settings.viewport3DSettings()
                                 engine.settings(display.showGrid,display.showXAxis,display.showYAxis,display.showZAxis)
+                                val appearance=next.settings.appearance
+                                engine.axisAppearance(appearance.numbers,appearance.labels,appearance.xLabel,appearance.yLabel,appearance.zLabel)
                                 if(applied?.settings?.viewport3DSettings()?.bounds3D!=display.bounds3D && (applied!=null || !restored)) {
                                     val b=display.bounds3D;engine.bounds(b.xmin,b.xmax,b.ymin,b.ymax,b.zmin,b.zmax)
                                 }

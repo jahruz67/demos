@@ -53,6 +53,16 @@ public final class NativeGeoGebraEngine implements AutoCloseable {
     }
     public void bounds(double xmin,double xmax,double ymin,double ymax,double zmin,double zmax){api.setCoordSystem(xmin,xmax,ymin,ymax,zmin,zmax,false);}
     public void settings(boolean grid,boolean x,boolean y,boolean z){api.setGridVisible(3,grid);api.setAxesVisible(3,x,y,z);}
+    public void axisAppearance(boolean numbers,boolean labels,String x,String y,String z){
+        org.geogebra.common.main.settings.EuclidianSettings settings=app.getSettings().getEuclidian(3);
+        String[] names={x,y,z};
+        settings.beginBatch();
+        for(int axis=0;axis<3;axis++){
+            settings.setShowAxisNumbers(axis,numbers);
+            settings.setAxisLabel(axis,labels?names[axis]:"");
+        }
+        settings.endBatch();
+    }
     public void focus(boolean focused){view.setNativeFocus(focused);}
     public void key(String name,boolean down,int modifiers){app.key(name,down,modifiers);}
     public void pointer(int action,NativePointer event){

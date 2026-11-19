@@ -68,13 +68,15 @@ graph export. Idle views stop rendering after pending updates settle.
   margin, CSS scale and rounded input coordinates are reproduced. At a
   1080 × 760 reference window, its 698 × 712 host produces a 696 × 710 logical
   view scaled to approximately 666.086 × 679.484 pixels.
-- The reference exposes axis-label text fields but does not apply them to its
-  3D engine. The native settings preserve that behavior.
+- Demos retains its original wrench button and graph-settings sheet. Its axis
+  numbers, label visibility and custom axis labels update the native engine;
+  this intentionally supports the existing Demos settings beyond the reference
+  wrapper's unused 3D label fields.
 - Lowercase internal labels make bare triples such as `(0,0,2)` GeoGebra vectors.
   Uppercase named triples such as `A=(1,2,3)` are points.
 - Surface/quadric opacity uses the engine's defaults. The wrapper's filling
   override applies only to inequality, integral and polygon objects.
-- UI settings use the reference's 320-pixel card, spacing, border dimensions,
+- The standalone viewport settings use the reference's 320-pixel card, spacing, border dimensions,
   font sizes/weights, blue colors, icon paths and control placement. Its initial
   loading indicator is native; the failure message gives an offline retry
   instruction appropriate to the native renderer.

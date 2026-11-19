@@ -69,7 +69,7 @@ data class CalculatorUiState(
     val showAxes3D: Boolean = true,
     val bounds3D: GraphBounds = GraphBounds(),
     val appearance2D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(),
-    val appearance3D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(xLabel="",yLabel="",zLabel=""),
+    val appearance3D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(),
     val precisionDigits: Int = 15,
     val complexMode: Boolean = false,
     val statusMessage: String? = null,

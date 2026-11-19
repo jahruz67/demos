@@ -3,6 +3,7 @@ package dev.demos.graphing
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.*
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -38,6 +39,31 @@ class CalculatorWorkflowTest {
         compose.runOnIdle { model.onAction(CalculatorAction.SetSlider("C", 3.0)) }
         assertEquals(3.0, model.state.value.sliders.first { it.name == "C" }.value, 0.0)
         assertEquals("x^3/3+C", model.plotExpressions(model.state.value).first().text)
+    }
+
+    @Test fun original3DSettingsButtonOpensTheSheetAndUpdatesTheNativeView() {
+        compose.runOnIdle {model.onAction(CalculatorAction.Toggle3D)}
+        compose.waitUntil(30_000) {model.calculator.viewport3D.xml.contains("coordSystem")}
+        compose.onAllNodesWithContentDescription("Graph settings").assertCountEquals(1)
+        compose.onNodeWithContentDescription("Graph settings").performClick()
+        compose.onNodeWithText("3D graph settings").assertIsDisplayed()
+        compose.onNodeWithText("XY plane grid").performClick()
+        compose.onNodeWithText("Axis numbers").performClick()
+        compose.onNode(hasSetTextAction() and hasText("X-axis label")).performTextReplacement("distance")
+        compose.waitUntil(30_000) {
+            val xml=model.calculator.viewport3D.xml
+            xml.contains("grid=\"false\"") && xml.contains("label=\"distance\"") &&
+                Regex("<axis[^>]+showNumbers=\"false\"").findAll(xml).count()==3
+        }
+        compose.onNodeWithText("Axis labels").performClick()
+        compose.waitUntil(30_000) { !model.calculator.viewport3D.xml.contains("label=\"distance\"") }
+        compose.onNodeWithText("3D axes",useUnmergedTree=true).performClick()
+        compose.waitUntil(30_000) {
+            Regex("<axis[^>]+show=\"false\"").findAll(model.calculator.viewport3D.xml).count()==3
+        }
+        compose.onNodeWithContentDescription("Close settings").performClick()
+        compose.onNodeWithText("3D graph settings").assertDoesNotExist()
+        assertTrue(model.state.value.is3D)
     }
 
     @Test fun screenshotIntegralEvaluatesAndUndoRestoresInput() {
