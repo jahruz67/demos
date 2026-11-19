@@ -1,0 +1,67 @@
+TEN PHYSICS STRESS CASES
+
+Chosen textbook-style scenarios, with SI units and radians.
+Each case solves for x. Copy 'Rearranged' into the calculator.
+Import docs/physics-stress-worksheet.json in Demos to load all ten.
+Answers independently computed with mpmath 1.3.0 at 80 decimal digits.
+The original equations are checked at those answers before writing fixtures.
+
+1. Projectile flight time — x is time (s)
+Original:   3.725=128.4575+37.8525*sin(0.73125)*x-(9.80665*x^2)/2
+Rearranged: x=(37.8525*sin(0.73125)+sqrt((37.8525*sin(0.73125))^2+2*9.80665*(128.4575-3.725)))/9.80665
+Expected:   x ≈ 8.241774903084338 s
+Branch:     Positive time; discard the negative quadratic root
+
+2. Incline, friction and pulley inertia — x is acceleration (m/s^2)
+Original:   (12.875+3.425+0.01675/0.0425^2)*x=12.875*9.80665*(sin(0.638)-0.1875*cos(0.638))-3.425*9.80665-0.2875/0.0425
+Rearranged: x=(12.875*9.80665*(sin(0.638)-0.1875*cos(0.638))-3.425*9.80665-0.2875/0.0425)/(12.875+3.425+0.01675/0.0425^2)
+Expected:   x ≈ 0.6190091484327437 m/s^2
+Branch:     Unique real solution
+
+3. Damped RLC frequency with combined capacitors — x is frequency (Hz)
+Original:   (2*pi*x)^2=1/(47.35e-3*((2.875e-6*6.425e-6)/(2.875e-6+6.425e-6)+0.375e-6))-((18.725+4.375)/(2*47.35e-3))^2
+Rearranged: x=sqrt(1/(47.35e-3*((2.875e-6*6.425e-6)/(2.875e-6+6.425e-6)+0.375e-6))-((18.725+4.375)/(2*47.35e-3))^2)/(2*pi)
+Expected:   x ≈ 474.3973355591675 Hz
+Branch:     Positive oscillation frequency
+
+4. Elliptical orbit speed at perigee — x is speed (m/s)
+Original:   x^2/2-(6.67430e-11*5.97219e24)/(6.371e6+421.375e3)=-(6.67430e-11*5.97219e24)/(2*(((6.371e6+421.375e3)+(6.371e6+35786.425e3))/2))
+Rearranged: x=sqrt((6.67430e-11*5.97219e24)*(2/(6.371e6+421.375e3)-1/(((6.371e6+421.375e3)+(6.371e6+35786.425e3))/2)))
+Expected:   x ≈ 10053.91981990633 m/s
+Branch:     Positive speed
+
+5. Relativistic speed from three momentum components — x is speed (m/s)
+Original:   9.1093837015e-31*x/sqrt(1-(x/299792458)^2)=sqrt((7.3525e-23+3.1875e-23)^2+(2.675e-23-9.125e-24)^2+(1.2375e-23)^2)
+Rearranged: x=(sqrt((7.3525e-23+3.1875e-23)^2+(2.675e-23-9.125e-24)^2+(1.2375e-23)^2)/9.1093837015e-31)/sqrt(1+(sqrt((7.3525e-23+3.1875e-23)^2+(2.675e-23-9.125e-24)^2+(1.2375e-23)^2)/(9.1093837015e-31*299792458))^2)
+Expected:   x ≈ 109877511.1068155 m/s
+Branch:     0 < x < 299792458
+
+6. Loaded RC charging threshold — x is time (s)
+Original:   1.2375=(12.175*8.215e3/(4.725e3+8.215e3))+(0.1875-(12.175*8.215e3/(4.725e3+8.215e3)))*exp(-x/(((4.725e3*8.215e3)/(4.725e3+8.215e3))*(2.275e-6+0.825e-6)))
+Rearranged: x=-(((4.725e3*8.215e3)/(4.725e3+8.215e3))*(2.275e-6+0.825e-6))*ln((1.2375-(12.175*8.215e3/(4.725e3+8.215e3)))/(0.1875-(12.175*8.215e3/(4.725e3+8.215e3))))
+Expected:   x ≈ 0.001394110058063182 s
+Branch:     Unique real solution
+
+7. Three-layer wall with convection on both sides — x is heat flow (W)
+Original:   563.15-295.65=x*(1/(37.875*1.2375)+0.01275/(16.425*1.2375)+0.0875/(0.04275*1.2375)+0.00625/(0.1875*1.2375)+1/(8.725*1.2375))
+Rearranged: x=(563.15-295.65)/(1/(37.875*1.2375)+0.01275/(16.425*1.2375)+0.0875/(0.04275*1.2375)+0.00625/(0.1875*1.2375)+1/(8.725*1.2375))
+Expected:   x ≈ 148.9850595606308 W
+Branch:     Unique real solution
+
+8. Radiative equilibrium including background temperature — x is temperature (K)
+Original:   (0.9275*5.670374419e-8*4*pi*(6.371e6)^2)*(x^4-2.72548^4)=(1361.275*(1-0.2875)*pi*(6.371e6)^2+4.725e13)
+Rearranged: x=((1361.275*(1-0.2875)*pi*(6.371e6)^2+4.725e13)/(0.9275*5.670374419e-8*4*pi*(6.371e6)^2)+2.72548^4)^(1/4)
+Expected:   x ≈ 260.6020005771929 K
+Branch:     Positive absolute temperature
+
+9. Bernoulli flow with pipe friction and minor losses — x is outlet speed (m/s)
+Original:   ((287500-101325)/998.275+9.80665*(14.875-2.375))=x^2*(1-(0.02875/0.0875)^4+0.03125*(18.725/0.02875)+0.475+1.875+0.325)/2
+Rearranged: x=sqrt(2*((287500-101325)/998.275+9.80665*(14.875-2.375))/(1-(0.02875/0.0875)^4+0.03125*(18.725/0.02875)+0.475+1.875+0.325))
+Expected:   x ≈ 5.073346415849578 m/s
+Branch:     Positive flow speed
+
+10. Driven damped oscillator at a specified instant — x is displacement (m)
+Original:   ((2.875+0.425)*cos(2*pi*7.375*0.2375-atan2(((0.1875+0.0625)*(2*pi*7.375)),(0.725*(2*pi*8.125)^2-0.725*(2*pi*7.375)^2))))=x*sqrt((0.725*(2*pi*8.125)^2-0.725*(2*pi*7.375)^2)^2+((0.1875+0.0625)*(2*pi*7.375))^2)
+Rearranged: x=((2.875+0.425)*cos(2*pi*7.375*0.2375-atan2(((0.1875+0.0625)*(2*pi*7.375)),(0.725*(2*pi*8.125)^2-0.725*(2*pi*7.375)^2))))/sqrt((0.725*(2*pi*8.125)^2-0.725*(2*pi*7.375)^2)^2+((0.1875+0.0625)*(2*pi*7.375))^2)
+Expected:   x ≈ -0.0002476293939237139 m
+Branch:     Unique real solution

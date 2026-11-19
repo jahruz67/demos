@@ -101,6 +101,15 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
         focus.requestFocus()
         latestInput(latestValue.copy(selection = if (extend) TextRange(latestValue.selection.start, offset) else TextRange(offset)))
     }
+    // Several hardware events can arrive before Compose accepts the next value.
+    // Advance this composition's input snapshot after every event in that burst.
+    var keyboardValue = value
+    fun keyboardInput(next: TextFieldValue) { keyboardValue = next; latestInput(next) }
+    fun keyboardChoose(offset: Int, extend: Boolean = false) {
+        latestSelect()
+        focus.requestFocus()
+        keyboardInput(keyboardValue.copy(selection = if (extend) TextRange(keyboardValue.selection.start, offset) else TextRange(offset)))
+    }
     fun nearest(point: Offset): Int? {
         val all = latestHits.values.flatten()
         if (all.isEmpty()) return 0
@@ -179,24 +188,25 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
             modifier = modifier.heightIn(min = minimumHeight).focusRequester(focus).onFocusChanged { onFocus(it.isFocused) }
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) false else when (event.key) {
-                        Key.Backspace -> { onInput(MathInputRules.backspace(value)); true }
+                        Key.Backspace -> { keyboardInput(MathInputRules.backspace(keyboardValue)); true }
                         Key.DirectionLeft, Key.DirectionRight -> {
                             val direction = if (event.key == Key.DirectionLeft) -1 else 1
                             if (event.isShiftPressed) {
-                                val offsets = tree.caretOffsets(value.text)
-                                val next = if (direction < 0) offsets.lastOrNull { it < value.selection.end }
-                                    else offsets.firstOrNull { it > value.selection.end }
-                                if (next != null) choose(next, true)
-                            } else onInput(MathInputRules.move(value, direction))
+                                val offsets = editableMath(keyboardValue.text).caretOffsets(keyboardValue.text)
+                                val next = if (direction < 0) offsets.lastOrNull { it < keyboardValue.selection.end }
+                                    else offsets.firstOrNull { it > keyboardValue.selection.end }
+                                if (next != null) keyboardChoose(next, true)
+                            } else keyboardInput(MathInputRules.move(keyboardValue, direction))
                             true
                         }
                         Key.DirectionUp, Key.DirectionDown -> {
-                            val current = hits[owner]?.minByOrNull { abs(it.offset - value.selection.end) }
+                            val currentOwner = editableMath(keyboardValue.text).slots().firstOrNull { keyboardValue.selection.end in it.start..it.end }
+                            val current = hits[currentOwner]?.minByOrNull { abs(it.offset - keyboardValue.selection.end) }
                             val next = current?.let { here -> hits.values.flatten().filter {
                                 if (event.key == Key.DirectionUp) it.position.y + it.height / 2 < here.position.y
                                 else it.position.y > here.position.y + here.height / 2
                             }.minByOrNull { abs(it.position.x - here.position.x) + abs(it.position.y - here.position.y) * 2 } }
-                            if (next != null) choose(next.offset, event.isShiftPressed)
+                            if (next != null) keyboardChoose(next.offset, event.isShiftPressed)
                             true
                         }
                         else -> false
@@ -353,7 +363,8 @@ private fun MathEditorLeaf(slot: MathSlot, value: TextFieldValue, size: Int, own
     hits: MutableMap<MathSlot, List<MathHit>>) {
     val raw = value.text.substring(slot.start, slot.end)
     val transformed = remember(raw) { LatexVisualTransformation.filter(AnnotatedString(raw)) }
-    val shown = if (raw.isEmpty()) AnnotatedString(if (slot.emptyArgument && value.text.isNotEmpty()) "□" else "\u200b") else transformed.text
+    val shown = if (raw.isEmpty()) AnnotatedString("\u200b") else transformed.text
+    val minimumWidth = if (slot.emptyArgument && value.text.isNotEmpty()) with(LocalDensity.current) { (size * .5).sp.toDp() } else 2.dp
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     var origin by remember { mutableStateOf(Offset.Zero) }
     val active = owner == slot
@@ -372,8 +383,8 @@ private fun MathEditorLeaf(slot: MathSlot, value: TextFieldValue, size: Int, own
         }
     }
     DisposableEffect(slot, hits) { onDispose { hits.remove(slot) } }
-    Box(Modifier.widthIn(min = 2.dp).onGloballyPositioned { origin = it.positionInRoot() }) {
-        Text(shown, style = mathTextStyle(size.sp), color = if (raw.isEmpty() && slot.emptyArgument) DemosColors.Subtle else DemosColors.Ink,
+    Box(Modifier.widthIn(min = minimumWidth).onGloballyPositioned { origin = it.positionInRoot() }, propagateMinConstraints = true) {
+        Text(shown, style = mathTextStyle(size.sp), color = DemosColors.Ink,
             softWrap = false, onTextLayout = { layout = it })
         Canvas(Modifier.matchParentSize()) {
             val result = layout ?: return@Canvas

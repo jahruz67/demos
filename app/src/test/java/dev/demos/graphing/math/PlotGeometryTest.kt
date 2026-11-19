@@ -37,6 +37,29 @@ class PlotGeometryTest {
             assertEquals(9.0,(x*x+y*y).toDouble(),0.01)
         }
     }
+    @Test fun adjacentCoordinatesPlotAsAFieldSurfaceOrImplicitRelation() {
+        assertEquals(PlotKind.XY_FIELD, program("xy").relations.single().kind)
+        val surface = program("z=xy")
+        assertEquals(PlotKind.Z_SURFACE, surface.relations.single().kind)
+        assertEquals(6.0, surface.relations.single().expressions.single().evaluate(mapOf("x" to 2.0, "y" to 3.0)), 0.0)
+        val hyperbola = program("xy=1")
+        assertEquals(PlotKind.IMPLICIT, hyperbola.relations.single().kind)
+        val geometry = PlotGeometry.sample2D(hyperbola, Viewport(width = 6.0, height = 6.0))
+        assertTrue(geometry.strokes.isNotEmpty())
+        for (line in geometry.strokes) for (i in line.coordinates.indices step 2) {
+            assertEquals(1.0, (line.coordinates[i] * line.coordinates[i + 1]).toDouble(), .01)
+        }
+    }
+    @Test fun nativeGraphTranslationRecognizesCoordinateProducts() {
+        val sources = listOf("xy=1", "z=xy")
+        val symbols = MathSyntax.symbols(sources)
+        val translations = sources.map { GeoGebraExpressions.translate(it, "g", symbols.variables, symbols.functions, PlotSettings()) }
+        assertEquals("implicit_2d", translations[0].kind)
+        assertEquals("g:x*y=1", translations[0].command.replace(" ", ""))
+        assertEquals("explicit_3d", translations[1].kind)
+        assertEquals("g(x,y)=x*y", translations[1].command.replace(" ", ""))
+        assertTrue(translations.all { it.undefined.isEmpty() })
+    }
     @Test fun bareExpressionInXAndYIsNotGraphedIn2D() {
         val p=program("y√x − y² −2x +7y")
         assertEquals(PlotKind.XY_FIELD,p.relations.single().kind)

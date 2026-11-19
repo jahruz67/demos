@@ -36,10 +36,10 @@ class MathDisplayTest {
         assertEquals(MathDisplay.Row(listOf(text("x"), text("<="), fraction("1", "2"))), mathDisplay("x<=1/2"))
     }
 
-    @Test fun editingAnIncompleteFractionShowsAnEmptySlot() {
-        assertEquals(fraction("900", "□"), mathDisplay("900/"))
-        assertEquals(fraction("□", "8"), mathDisplay("/8"))
-        assertEquals(fraction("□", "□"), mathDisplay("\\frac{}{}"))
+    @Test fun incompleteFractionsKeepBlankSlotsWithoutBoxes() {
+        assertEquals(fraction("900", ""), mathDisplay("900/"))
+        assertEquals(fraction("", "8"), mathDisplay("/8"))
+        assertEquals(fraction("", ""), mathDisplay("\\frac{}{}"))
         assertFalse(mathDisplay("\\frac{900").hasFraction())
     }
 

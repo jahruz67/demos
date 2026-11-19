@@ -1052,8 +1052,7 @@ internal fun MathExpression(source: String, fontSize: Int = 24, showCursor: Bool
                     MathCaret(fontSize)
                     PrettyText(body.drop(bodyCursor), fontSize)
                 } else {
-                    if (body.isEmpty()) Text("□", style = mathTextStyle(fontSize.sp), color = DemosColors.Subtle)
-                    else PrettyText(body, fontSize)
+                    PrettyText(body, fontSize)
                 }
                 PrettyText(" d$variable", fontSize)
                 if (showCursor && cursor >= source.length) MathCaret(fontSize)

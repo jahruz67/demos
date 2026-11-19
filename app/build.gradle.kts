@@ -50,6 +50,12 @@ android {
     sourceSets.getByName("main") {
         java.srcDirs("../shared/src/main/kotlin", "../shared/src/main/java")
     }
+    listOf("test", "androidTest").forEach { name ->
+        sourceSets.getByName(name) {
+            java.srcDir("src/sharedTest/kotlin")
+            resources.srcDir("src/sharedTest/resources")
+        }
+    }
     packaging {
         resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1", "META-INF/LICENSE*", "META-INF/NOTICE*")
     }

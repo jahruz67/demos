@@ -66,7 +66,6 @@ object LatexVisualTransformation : VisualTransformation {
                             emit(at, commandEnd + 1, "")
                             render(commandEnd + 1, indexEnd, script(true), depth + 1)
                             emit(indexEnd, radicand.first + 1, "√(", style)
-                            if (radicand.first + 1 == radicand.last) emit(radicand.last, radicand.last, "□", style)
                             render(radicand.first + 1, radicand.last, style, depth + 1)
                             emit(radicand.last, radicand.last + 1, ")", style)
                             at = radicand.last + 1
@@ -77,10 +76,8 @@ object LatexVisualTransformation : VisualTransformation {
                         val denominator = group(argument.last + 1, end)
                         if (denominator != null) {
                             emit(at, argument.first + 1, "")
-                            if (argument.first + 1 == argument.last) emit(argument.last, argument.last, "□", script(true))
                             render(argument.first + 1, argument.last, script(true), depth + 1)
                             emit(argument.last, denominator.first + 1, "⁄", style)
-                            if (denominator.first + 1 == denominator.last) emit(denominator.last, denominator.last, "□", script(false))
                             render(denominator.first + 1, denominator.last, script(false), depth + 1)
                             emit(denominator.last, denominator.last + 1, "", moveCaret = false)
                             at = denominator.last + 1
@@ -89,7 +86,6 @@ object LatexVisualTransformation : VisualTransformation {
                     }
                     if (command == "sqrt" && argument != null) {
                         emit(at, argument.first + 1, "√(", style)
-                        if (argument.first + 1 == argument.last) emit(argument.last, argument.last, "□", style)
                         render(argument.first + 1, argument.last, style, depth + 1)
                         emit(argument.last, argument.last + 1, ")", style)
                         at = argument.last + 1
@@ -130,7 +126,6 @@ object LatexVisualTransformation : VisualTransformation {
                     val argument = group(at + 1, end)
                     if (argument != null) {
                         emit(at, argument.first + 1, "")
-                        if (argument.first + 1 == argument.last) emit(argument.last, argument.last, "□", script(c == '^'))
                         render(argument.first + 1, argument.last, script(c == '^'), depth + 1)
                         emit(argument.last, argument.last + 1, "", moveCaret = false)
                         at = argument.last + 1

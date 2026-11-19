@@ -31,4 +31,11 @@ class CasSyntaxTest {
             assertTrue(it, runCatching { CasSyntax.prepare(it) }.isFailure)
         }
     }
+    @Test fun adjacentCoordinatesHaveTheSameProductsAsTheGraph() {
+        assertEquals("x*y", CasSyntax.normalize("xy"))
+        assertEquals("x*y=1", CasSyntax.normalize("xy=1"))
+        assertEquals("2*x*y^2", CasSyntax.normalize("2xy^2"))
+        assertEquals("xy:=5", CasSyntax.normalize("xy:=5"))
+        assertEquals("f(xy)=xy+x*y", CasSyntax.normalize("f(xy)=xy+x*y"))
+    }
 }

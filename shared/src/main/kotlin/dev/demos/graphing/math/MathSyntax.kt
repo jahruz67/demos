@@ -1,6 +1,6 @@
 package dev.demos.graphing.math
 
-/** Notation shared by arithmetic, plotting and Giac. Names remain whole identifiers. */
+/** Notation shared by arithmetic, plotting and Giac. Declared names remain whole identifiers. */
 object MathSyntax {
     val unaryFunctions = setOf("sin", "cos", "tan", "asin", "acos", "atan", "arcsin", "arccos", "arctan",
         "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "sec", "csc", "cot", "ln", "log", "log2", "log10",
@@ -9,6 +9,7 @@ object MathSyntax {
         "integrate", "integral", "int", "diff", "derive", "simplify", "factor", "expand", "normal", "partfrac",
         "solve", "fsolve", "desolve", "limit", "if", "det", "sum", "product", "abs")
     private val coordinateNames = setOf("x", "y", "z", "t", "u", "v", "r", "theta", "pi", "e", "C")
+    private fun coordinateProduct(name: String) = name.length > 1 && name.all { it in "xyztuvr" }
     private val keywords = setOf("and", "or", "not", "xor", "in", "when", "then", "else", "for", "from", "to", "do", "end", "local", "return")
     private val nativeAliases = mapOf("arcsin" to "asin", "arccos" to "acos", "arctan" to "atan",
         "signum" to "sign", "integral" to "integrate", "derive" to "diff", "root" to "surd", "nthroot" to "surd")
@@ -77,14 +78,25 @@ object MathSyntax {
 
     /** Token boundaries distinguish 2e-3 from 2*e, and v_0 from v*0. */
     fun explicitProducts(source: String, symbols: Symbols = Symbols()): String {
-        val tokens = tokenize(source)
+        val definition = definition(source)
+        val localSymbols = symbols.copy(
+            variables = symbols.variables + definition?.parameters.orEmpty() +
+                listOfNotNull(definition?.takeIf { it.parameters == null }?.name),
+            functions = symbols.functions + listOfNotNull(definition?.takeIf { it.parameters != null }?.name),
+        )
+        val tokens = tokenize(source).flatMap { token ->
+            if (token.kind == Kind.Name && coordinateProduct(token.text) &&
+                token.text !in localSymbols.variables && token.text !in localSymbols.functions) {
+                token.text.mapIndexed { index, c -> Token(c.toString(), token.start + index, token.start + index + 1, Kind.Name) }
+            } else listOf(token)
+        }
         val out = StringBuilder()
         var previous: Token? = null
         var end = 0
         for (token in tokens) {
             out.append(source.substring(end, token.start))
             val left = previous
-            if (left != null && productBetween(left, token, symbols)) out.append('*')
+            if (left != null && productBetween(left, token, localSymbols)) out.append('*')
             out.append(token.text)
             previous = token
             end = token.end
@@ -234,6 +246,9 @@ object MathSyntax {
             parameters = names
         }
         val operator = tokens.getOrNull(at)?.takeIf { it.text == "=" || it.text == ":=" } ?: return null
+        // xy=1 describes a relation between coordinates. An explicit := can still
+        // declare a quantity named xy, and function names/parameters stay intact.
+        if (parameters == null && operator.text == "=" && coordinateProduct(first.text)) return null
         val body = text.substring(operator.end).trim().takeIf { it.isNotEmpty() } ?: return null
         // A chained equality remains a relation, rather than binding a boolean.
         var depth = 0
@@ -254,10 +269,13 @@ object MathSyntax {
 
     /** Load transitive dependencies, so an unrelated unfinished row cannot poison the CAS. */
     fun relevantDefinitions(input: String, sources: List<String>): List<String> {
-        fun names(source: String): Set<String> = tokenize(normalize(source)).filter { it.kind == Kind.Name }.map { it.text }.toSet()
+        val declared = symbols(sources)
+        fun names(source: String, parameters: List<String> = emptyList()): Set<String> =
+            tokenize(explicitProducts(normalize(source), declared.copy(variables = declared.variables + parameters)))
+                .filter { it.kind == Kind.Name }.map { it.text }.toSet()
         fun references(source: String): Set<String> {
             val definition = runCatching { definition(source) }.getOrNull()
-            return if (definition == null) names(source) else names(definition.body) - definition.parameters.orEmpty()
+            return if (definition == null) names(source) else names(definition.body, definition.parameters.orEmpty()) - definition.parameters.orEmpty()
         }
         val providers = mutableMapOf<String, Int>()
         val dependencies = ArrayList<Set<String>>()

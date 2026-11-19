@@ -19,4 +19,17 @@ class ResultFormattingTest {
         assertEquals(2, transformed.offsetMapping.transformedToOriginal(1))
         assertEquals(1, transformed.offsetMapping.originalToTransformed(2))
     }
+    @Test fun emptyLatexArgumentsHaveNoBoxesAndKeepValidCaretMappings() {
+        val cases = mapOf("\\frac{}{}" to "⁄", "\\sqrt{}" to "√()", "\\sqrt[3]{}" to "3√()", "x^{}" to "x", "x_{}" to "x")
+        for ((source, expected) in cases) {
+            val transformed = LatexVisualTransformation.filter(AnnotatedString(source))
+            assertEquals(source, expected, transformed.text.text)
+            val forward = (0..source.length).map(transformed.offsetMapping::originalToTransformed)
+            val backward = (0..expected.length).map(transformed.offsetMapping::transformedToOriginal)
+            assertTrue(source, forward.all { it in 0..expected.length })
+            assertTrue(source, backward.all { it in 0..source.length })
+            assertEquals(source, forward.sorted(), forward)
+            assertEquals(source, backward.sorted(), backward)
+        }
+    }
 }

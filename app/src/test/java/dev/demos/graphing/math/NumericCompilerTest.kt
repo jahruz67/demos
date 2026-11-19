@@ -26,6 +26,16 @@ class NumericCompilerTest {
         assertEquals(-2.0,value("(-8)^(1/3)"),1e-12)
         assertEquals(4.0,value("(-8)^(2/3)"),1e-12)
     }
+    @Test fun adjacentCoordinatesEvaluateAsMultiplication() {
+        val variables = mapOf("x" to 2.0, "y" to 3.0, "z" to 4.0)
+        assertEquals(setOf("x", "y"), NumericCompiler.compile("xy").variables)
+        assertEquals(6.0, value("xy", variables), 0.0)
+        assertEquals(36.0, value("2xy^2", variables), 0.0)
+        assertEquals(18.0, value("xy(x+1)", variables), 0.0)
+        assertEquals(24.0, value("xyz", variables), 0.0)
+        assertEquals(7.0, NumericCompiler.compile("xy+2", symbols = MathSyntax.Symbols(variables = setOf("xy")))
+            .evaluate(mapOf("xy" to 5.0)), 0.0)
+    }
     @Test fun numericalIntegralRespectsBoundVariableScope() {
         assertEquals(435000.0,value("integrate(87x,x,0,100)"),1e-6)
         assertEquals(9.0,value("integrate(x^2,x,0,x)",mapOf("x" to 3.0)),1e-7)

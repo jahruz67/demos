@@ -9,6 +9,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -28,6 +29,35 @@ import java.io.File
 @OptIn(ExperimentalTestApi::class)
 class FractionDisplayTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun emptyOperandsStayEditableWithoutShowingBoxes() {
+        val value = mutableStateOf(TextFieldValue())
+        compose.setContent {
+            Column {
+                MathEditor(value.value, true, 1, Modifier.width(300.dp),
+                    onInput = { value.value = MathInputRules.apply(value.value, it) }, onFocus = {}, onSelect = {})
+                StructuredMath(value.value.text, 24)
+                MathExpression("integrate(,x)")
+            }
+        }
+        val equation = compose.onNodeWithContentDescription("Equation 1")
+        val cases = listOf("2*" to 2, "1+" to 2, "\\frac{2}{}" to 9, "2^{}" to 3,
+            "\\sqrt{}" to 6, "\\sqrt[3]{}" to 9, "sin()" to 4)
+        for ((source, cursor) in cases) {
+            compose.runOnIdle { value.value = TextFieldValue(source, TextRange(cursor)) }
+            compose.onAllNodesWithText("□", substring = true, useUnmergedTree = true).assertCountEquals(0)
+            if (source != "sin()") {
+                compose.runOnIdle { value.value = value.value.copy(selection = TextRange.Zero) }
+                val blanks = compose.onAllNodesWithText("\u200b", useUnmergedTree = true)
+                val target = blanks.fetchSemanticsNodes().indexOfFirst { it.boundsInRoot.width > 3f }
+                assertTrue("$source keeps a blank touch target", target >= 0)
+                blanks[target].performTouchInput { click(center) }
+                compose.runOnIdle { assertEquals(source, cursor, value.value.selection.end) }
+            }
+            equation.performTextInput("3")
+            compose.runOnIdle { assertEquals(source.replaceRange(cursor, cursor, "3"), value.value.text) }
+        }
+    }
 
     @Test fun exponentSlotsAndVerticalKeyboardNavigationWorkDirectly() {
         val value = mutableStateOf(TextFieldValue("2^{}", TextRange(3)))

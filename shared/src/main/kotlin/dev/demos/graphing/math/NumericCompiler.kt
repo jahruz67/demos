@@ -32,8 +32,8 @@ class EvaluationContext(
     fun variable(name: String): Double = locals[name] ?: constants[name] ?: when (name) {
         "x" -> x; "y" -> y; "z" -> z; "t", "theta" -> t
         "pi" -> PI; "e" -> E; "Infinity" -> Double.POSITIVE_INFINITY
-        // A named quantity must have the same meaning in Giac and on the graph.
-        // Separate factors with whitespace or a multiplication sign.
+        // Products of coordinates are separated by MathSyntax before parsing;
+        // unresolved named quantities have no numeric value.
         else -> Double.NaN
     }
 }

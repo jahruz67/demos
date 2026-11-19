@@ -23,7 +23,7 @@ internal fun mathDisplay(source: String): MathDisplay {
 private fun displayPart(source: String, depth: Int): MathDisplay {
     val text = source.trim()
     if (depth >= 32) return MathDisplay.Text(text)
-    if (text.isEmpty()) return MathDisplay.Text("□")
+    if (text.isEmpty()) return MathDisplay.Text("")
     var nesting = 0
     var sum = -1
     var product = -1
