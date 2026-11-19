@@ -69,7 +69,7 @@ class MathEditingTest {
         value = moveToEnd(value)
         value = type(value, "884(54)(2x-2/2")
         value = moveToEnd(value)
-        value = type(value, "^234")
+        value = type(value, ")^234")
         value = moveToEnd(value)
         value = type(value, "ln(4)")
         value = moveToEnd(value)
@@ -115,11 +115,13 @@ class MathEditingTest {
         assertEquals(EditableMath.Text(9, 10), root.body)
     }
 
-    @Test fun functionsCompleteAfterCoordinatesAndConstantsWithoutSplittingOrdinaryNames() {
-        assertEquals("x*log()", type(TextFieldValue(), "xlog").text)
-        assertEquals("pi*log()", type(TextFieldValue(), "pilog").text)
-        assertEquals("x log()", type(TextFieldValue(), "x log").text)
-        assertEquals("x*sinh()", type(TextFieldValue(), "xsinh").text)
+    @Test fun functionsSeparateFromCoordinatesAndConstantsWithoutSplittingOrdinaryNames() {
+        assertEquals("x*log", type(TextFieldValue(), "xlog").text)
+        assertEquals("pi*log", type(TextFieldValue(), "pilog").text)
+        assertEquals("x log", type(TextFieldValue(), "x log").text)
+        assertEquals("x*sinh", type(TextFieldValue(), "xsinh").text)
+        assertEquals("x*log(2)", type(TextFieldValue(), "xlog(2)").text)
+        assertEquals("sin(2)", type(TextFieldValue(), "sin(2)").text)
         assertEquals("catalog", type(TextFieldValue(), "catalog").text)
         assertEquals("xlog", MathInputRules.apply(TextFieldValue("xlo", TextRange(3)),
             TextFieldValue("xlog", TextRange(4)), setOf("xlog")).text)

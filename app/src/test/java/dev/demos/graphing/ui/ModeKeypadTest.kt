@@ -1,6 +1,7 @@
 package dev.demos.graphing.ui
 
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -16,19 +17,29 @@ import org.robolectric.annotation.Config
 class ModeKeypadTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
-    @Test fun portraitKeypadFollowsCalculatorAndGraphModes() = verifyModes()
+    @Test fun portraitKeypadFollowsCalculatorAndGraphModes() = verifyModes(800, 1280)
 
     @Test @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
-    fun landscapeKeypadFollowsCalculatorAndGraphModes() = verifyModes()
+    fun landscapeKeypadFollowsCalculatorAndGraphModes() = verifyModes(1280, 800)
 
-    private fun verifyModes() {
+    @Test @Config(qualifiers = "w360dp-h800dp-mdpi")
+    fun portraitPhoneKeypadFollowsCalculatorAndGraphModes() = verifyModes(360, 800)
+
+    @Test @Config(qualifiers = "w800dp-h360dp-land-mdpi")
+    fun landscapePhoneKeypadFollowsCalculatorAndGraphModes() = verifyModes(800, 360)
+
+    private fun verifyModes(width: Int, height: Int) {
         val state = mutableStateOf(CalculatorUiState(listOf(ExpressionRow(1, "")), 1, layout = CalculatorLayout.Calculator))
-        compose.setContent { CalculatorScreen(state.value, onAction = { action ->
-            if (action is CalculatorAction.EditRow) state.value = state.value.copy(rows = listOf(ExpressionRow(1, action.text)))
-        }, graph = { _, _ -> }) }
+        compose.setContent {
+            CompositionLocalProvider(LocalAppConfiguration provides AppConfiguration(width, height)) {
+                CalculatorScreen(state.value, onAction = { action ->
+                    if (action is CalculatorAction.EditRow) state.value = state.value.copy(rows = listOf(ExpressionRow(1, action.text)))
+                }, graph = { _, _ -> })
+            }
+        }
         compose.onNodeWithContentDescription("x").assertDoesNotExist()
         compose.onNodeWithContentDescription("y").assertDoesNotExist()
-        compose.onNodeWithContentDescription("aᵇ").assertIsDisplayed().performClick()
+        compose.onAllNodesWithContentDescription("aᵇ")[0].assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals("^{}", state.value.rows.first().text) }
         compose.onNodeWithContentDescription("Equation 1").performTextReplacement("")
         compose.runOnIdle { state.value = state.value.copy(layout = CalculatorLayout.Split) }

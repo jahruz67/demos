@@ -231,7 +231,7 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
                                     up.consume()
                                     showToolbar = false
                                     nearest(viewportOrigin + up.position)?.let { choose(it) }
-                                    showHandles = false
+                                    showHandles = true
                                 }
                             } else {
                                 val offset = nearest(viewportOrigin + down.position) ?: 0
@@ -262,12 +262,12 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
                         MathEditorNode(tree, value, fontSize, owner, selected && caretVisible, hits)
                       }
                     }
-                    if (selected && showHandles && !value.selection.collapsed) {
+                    if (selected && showHandles) {
                         fun dragStart(point: MathHit) {
                             showToolbar = false
                             handleDragPoint = point.position + Offset(0f, point.height / 2)
                         }
-                        startHit?.let { point ->
+                        startHit?.takeIf { !value.selection.collapsed }?.let { point ->
                             MathSelectionHandle(point, viewportOrigin, "Selection start",
                                 onStart = { dragStart(point) }, onEnd = { showToolbar = true }, onDrag = { delta ->
                                     handleDragPoint += delta
@@ -275,7 +275,7 @@ internal fun MathEditor(value: TextFieldValue, selected: Boolean, number: Int, m
                                 })
                         }
                         endHit?.let { point ->
-                            MathSelectionHandle(point, viewportOrigin, "Selection end",
+                            MathSelectionHandle(point, viewportOrigin, if (value.selection.collapsed) "Move cursor" else "Selection end",
                                 onStart = { dragStart(point) }, onEnd = { showToolbar = true }, onDrag = { delta ->
                                     handleDragPoint += delta
                                     nearest(handleDragPoint)?.let { offset ->
