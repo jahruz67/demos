@@ -231,61 +231,65 @@ class MainActivity : ComponentActivity() {
             .getOrElse { capturing = false; model.showMessage("Could not allocate the graph image"); return }
         val listener = PixelCopy.OnPixelCopyFinishedListener { result ->
             if (result != PixelCopy.SUCCESS) { capturing = false; bitmap.recycle(); model.showMessage("Could not capture graph ($result)"); return@OnPixelCopyFinishedListener }
-            lifecycleScope.launch {
-                var exported: File? = null
-                try {
-                    val file = withContext(Dispatchers.IO) {
-                        val directory = File(cacheDir, "exports").apply { mkdirs() }
-                        // Bound share-cache growth across repeated exports.
-                        directory.listFiles().orEmpty().filter { System.currentTimeMillis() - it.lastModified() > 86_400_000L }.forEach { it.delete() }
-                        File(directory, "demos-${System.currentTimeMillis()}.${format.extension}").also { target ->
-                            exported = target
-                            target.outputStream().use { output ->
-                                if (format == GraphExportFormat.PNG) check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
-                                else {
-                                    val pdf = PdfDocument()
-                                    try {
-                                        val width = if (bitmap.width >= bitmap.height) 842 else 595
-                                        val height = if (bitmap.width >= bitmap.height) 595 else 842
-                                        val page = pdf.startPage(PdfDocument.PageInfo.Builder(width, height, 1).create())
-                                        try {
-                                            page.canvas.drawColor(android.graphics.Color.WHITE)
-                                            val scale = minOf((width - 36f) / bitmap.width, (height - 36f) / bitmap.height)
-                                            val left = (width - bitmap.width * scale) / 2
-                                            val top = (height - bitmap.height * scale) / 2
-                                            page.canvas.drawBitmap(bitmap, null, RectF(left, top, left + bitmap.width * scale, top + bitmap.height * scale), Paint(Paint.FILTER_BITMAP_FLAG))
-                                        } finally { pdf.finishPage(page) }
-                                        pdf.writeTo(output)
-                                    } finally { pdf.close() }
-                                }
-                            }
-                        }
-                    }
-                    if (share) {
-                        val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.files", file)
-                        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                            type = format.mimeType; putExtra(Intent.EXTRA_STREAM, uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }, "Share graph"))
-                    } else {
-                        pendingFile = file
-                        exportKind = "Graph"
-                        val name = model.state.value.title.replace(Regex("[^\\p{L}\\p{N} _.-]"), "_").take(80).ifBlank { "graph" }
-                        chooseExport("$name.${format.extension}", format.mimeType)
-                    }
-                } catch (failure: Exception) {
-                    pendingFile = null
-                    exported?.delete()
-                    model.showMessage("Graph export failed: ${failure.message}")
-                } finally {
-                    bitmap.recycle()
-                    capturing = false
-                }
-            }
+            saveGraphBitmap(bitmap, format, share)
         }
         runCatching {
             PixelCopy.request(window, bounds, bitmap, listener, Handler(Looper.getMainLooper()))
         }.onFailure { capturing = false; bitmap.recycle(); model.showMessage("Graph export failed: ${it.message}") }
+    }
+
+    private fun saveGraphBitmap(bitmap: Bitmap, format: GraphExportFormat, share: Boolean) {
+        lifecycleScope.launch {
+            var exported: File? = null
+            try {
+                val file = withContext(Dispatchers.IO) {
+                    val directory = File(cacheDir, "exports").apply { mkdirs() }
+                    // Bound share-cache growth across repeated exports.
+                    directory.listFiles().orEmpty().filter { System.currentTimeMillis() - it.lastModified() > 86_400_000L }.forEach { it.delete() }
+                    File(directory, "demos-${System.currentTimeMillis()}.${format.extension}").also { target ->
+                        exported = target
+                        target.outputStream().use { output ->
+                            if (format == GraphExportFormat.PNG) check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                            else {
+                                val pdf = PdfDocument()
+                                try {
+                                    val width = if (bitmap.width >= bitmap.height) 842 else 595
+                                    val height = if (bitmap.width >= bitmap.height) 595 else 842
+                                    val page = pdf.startPage(PdfDocument.PageInfo.Builder(width, height, 1).create())
+                                    try {
+                                        page.canvas.drawColor(android.graphics.Color.WHITE)
+                                        val scale = minOf((width - 36f) / bitmap.width, (height - 36f) / bitmap.height)
+                                        val left = (width - bitmap.width * scale) / 2
+                                        val top = (height - bitmap.height * scale) / 2
+                                        page.canvas.drawBitmap(bitmap, null, RectF(left, top, left + bitmap.width * scale, top + bitmap.height * scale), Paint(Paint.FILTER_BITMAP_FLAG))
+                                    } finally { pdf.finishPage(page) }
+                                    pdf.writeTo(output)
+                                } finally { pdf.close() }
+                            }
+                        }
+                    }
+                }
+                if (share) {
+                    val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.files", file)
+                    startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                        type = format.mimeType; putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }, "Share graph"))
+                } else {
+                    pendingFile = file
+                    exportKind = "Graph"
+                    val name = model.state.value.title.replace(Regex("[^\\p{L}\\p{N} _.-]"), "_").take(80).ifBlank { "graph" }
+                    chooseExport("$name.${format.extension}", format.mimeType)
+                }
+            } catch (failure: Exception) {
+                pendingFile = null
+                exported?.delete()
+                model.showMessage("Graph export failed: ${failure.message}")
+            } finally {
+                bitmap.recycle()
+                capturing = false
+            }
+        }
     }
 
     private fun readDocument(stream: InputStream, limit: Int = 5_000_000): String = stream.bufferedReader().use { reader ->

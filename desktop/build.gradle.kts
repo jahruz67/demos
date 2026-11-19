@@ -41,6 +41,13 @@ tasks.named<Jar>("jar") {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    implementation(project(":geogebra"))
+    implementation("org.jogamp.jogl:jogl-all:2.6.0")
+    implementation("org.jogamp.gluegen:gluegen-rt:2.6.0")
+    val joglPlatform = if (System.getProperty("os.name").startsWith("Windows")) "windows-amd64" else "linux-amd64"
+    runtimeOnly("org.jogamp.jogl:jogl-all:2.6.0:natives-$joglPlatform")
+    runtimeOnly("org.jogamp.gluegen:gluegen-rt:2.6.0:natives-$joglPlatform")
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
@@ -55,6 +62,10 @@ val prepareWindowsResources by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("appResources"))
     from(layout.buildDirectory.dir("native-dist")) { into("windows/$nativeResourceDirectory") }
     from(rootProject.file("app/src/main/assets/cas")) { into("common/licenses") }
+    from(rootProject.file("third_party/geogebra")) {
+        include("README.md", "manifest.json", "geogebra-5.4.920.0-sources.zip", "reference-sources.zip")
+        into("common/sources/geogebra")
+    }
     from(rootProject.file("third_party/giac")) {
         include("README.md")
         into("common/sources")
@@ -95,9 +106,9 @@ compose.desktop {
             targetFormats(TargetFormat.Exe)
             packageName = "Demos"
             packageVersion = "0.1.${providers.gradleProperty("versionCode").orElse("1").get()}"
-            description = "Offline graphing and symbolic calculator"
+            description = "Graphing and symbolic calculator"
             vendor = "Demos"
-            modules("java.desktop", "java.prefs", "java.logging", "jdk.unsupported", "jdk.crypto.ec")
+            modules("java.desktop", "java.prefs", "java.logging", "java.instrument", "java.sql", "jdk.unsupported", "jdk.crypto.ec")
             appResourcesRootDir.set(layout.dir(prepareWindowsResources.map { it.destinationDir }))
             windows {
                 iconFile.set(project.file("src/main/resources/demos.ico"))

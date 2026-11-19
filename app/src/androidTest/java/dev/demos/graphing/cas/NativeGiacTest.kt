@@ -12,6 +12,31 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 @RunWith(AndroidJUnit4::class)
 class NativeGiacTest {
+    @Test fun geoGebraIntegralUsesItsOriginalProtocolInTheIsolatedNativeService() {
+        val service=CasEngine(InstrumentationRegistry.getInstrumentation().targetContext)
+        val calls=java.util.concurrent.atomic.AtomicInteger()
+        try {
+            dev.demos.graphing.plot.createGeoGebraGraphics().use {graphics->
+                val cas=dev.demos.graphing.geogebra.NativeCas { input, initialization ->
+                    val answer=java.util.concurrent.CompletableFuture<CasResult>()
+                    service.evaluateGeoGebra("viewport-test",input,initialization) {answer.complete(it)}
+                    val result=answer.get(25,TimeUnit.SECONDS)
+                    check(result.error==null){result.error.orEmpty()}
+                    calls.incrementAndGet()
+                    result.exact
+                }
+                dev.demos.graphing.geogebra.NativeGeoGebraEngine(graphics.text,cas).use {engine->
+                    graphics.resize(600,600,1f);engine.initialize(graphics.gl,600,600)
+                    assertNotNull(engine.api().evalCommandGetLabels("f(x)=Integral(x^2)"))
+                    assertEquals(9.0,engine.api().getValue("f(3)"),1e-10)
+                    assertNotNull(engine.api().evalCommandGetLabels("g(x)=Integral(sin(x))"))
+                    assertEquals(-1.0,engine.api().getValue("g(0)"),1e-10)
+                    assertTrue("GeoGebra actually called native Giac",calls.get()>0)
+                    engine.draw()
+                }
+            }
+        } finally {service.close()}
+    }
     @Test fun genuineNativeCasCoversExactAndSymbolicOperations() {
         val cases = linkedMapOf(
             "1/3+1/6" to "1/2",

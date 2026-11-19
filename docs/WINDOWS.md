@@ -1,8 +1,8 @@
 # Windows desktop app
 
-The Windows desktop app shares the Android tablet worksheet, calculator, expression engine, graph data, saved documents, and settings. It starts in the tablet split layout and includes native Windows file pickers, clipboard integration, offline symbolic evaluation, 2D and 3D graphs, graph image/PDF export, and a standalone Windows installer.
+The Windows desktop app shares the Android tablet worksheet, calculator, expression engine, graph data, saved documents, and settings. It starts in the tablet split layout and includes native Windows file pickers, clipboard integration, offline symbolic evaluation, native 2D and 3D graphs, graph image/PDF export, and a standalone Windows installer.
 
-Android and Windows both compile `shared/src/main/` and render the same `CalculatorApp`, including the keypad, graph controls, and Compose 2D/3D renderers. Mouse and touch input use the same graph implementation. Keep app features in the shared sources; platform hosts provide window/lifecycle handling and native services without excluding or replacing shared UI files.
+Android and Windows both compile `shared/src/main/` and render the same `CalculatorApp`, including the keypad and graph controls. The 3D viewport compiles the pinned GeoGebra Java engine from the `geographer` reference and executes its shared geometry, camera, input and shader implementation through native JOGL OpenGL on desktop. The reference's floating settings and controls use Compose. Engine sources, fonts and notices are packaged locally; there is no browser or remote graphing engine. See [native 3D verification](NATIVE_3D.md). Keep app features in the shared sources; platform hosts provide window/lifecycle handling and native services without excluding or replacing shared UI files.
 
 ## Build and run
 

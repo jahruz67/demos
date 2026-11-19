@@ -35,8 +35,12 @@ class CasService : Service() {
                 val id = data.getLong("id")
                 val expression = data.getString("expression").orEmpty()
                 val definitions = data.getStringArrayList("definitions").orEmpty()
+                val geoGebra = data.getBoolean("geoGebra")
                 worker.execute {
-                    val result = try { NativeGiac.evaluate(expression, definitions) }
+                    val result = try {
+                        if (geoGebra) NativeGiac.evaluateGeoGebra(expression, definitions)
+                        else NativeGiac.evaluate(expression, definitions)
+                    }
                     catch (failure: Throwable) { CasResult(expression, "", error = failure.message ?: "CAS evaluation failed") }
                     send(reply, RESULT, Bundle().apply {
                         putLong("id", id)

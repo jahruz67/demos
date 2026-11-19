@@ -43,7 +43,7 @@ class CasEngine(context: Context) {
 
     private data class Request(
         val id: Long, val key: String, val input: String,
-        val definitions: List<String>, val callback: (CasResult) -> Unit,
+        val definitions: List<String>, val geoGebra: Boolean, val callback: (CasResult) -> Unit,
     )
 
     private val incoming = Messenger(Handler(Looper.getMainLooper()) { message ->
@@ -110,12 +110,21 @@ class CasEngine(context: Context) {
     fun evaluate(key: String, expression: String, onResult: (CasResult) -> Unit) =
         evaluate(key, expression, emptyList(), onResult)
 
-    fun evaluate(key: String, expression: String, definitions: List<String>, onResult: (CasResult) -> Unit) = onMain {
+    fun evaluate(key: String, expression: String, definitions: List<String>, onResult: (CasResult) -> Unit) =
+        enqueue(key, expression, definitions, false, onResult)
+
+    internal fun evaluateGeoGebra(key: String, expression: String, initialization: List<String>, onResult: (CasResult) -> Unit) =
+        enqueue(key, expression, initialization, true, onResult)
+
+    private fun enqueue(key: String, expression: String, definitions: List<String>, geoGebra: Boolean, onResult: (CasResult) -> Unit) = onMain {
         if (closed) return@onMain
-        val request = Request(ids.incrementAndGet(), key, expression, definitions.toList(), onResult)
+        val request = Request(ids.incrementAndGet(), key, expression, definitions.toList(), geoGebra, onResult)
         latest[key] = request.id
         queue.removeAll { it.key == key }
-        try { CasSyntax.prepare(expression) }
+        try {
+            if (geoGebra) require(expression.length + definitions.sumOf { it.length } <= 500_000) { "CAS request is too large" }
+            else CasSyntax.prepare(expression)
+        }
         catch (invalid: IllegalArgumentException) {
             if (active?.key == key) { active = null; disconnect(kill = true) }
             deliver(request, CasResult(expression, "", error = invalid.message))
@@ -132,13 +141,16 @@ class CasEngine(context: Context) {
 
     /** Removes a deleted row's work, including its currently executing native calculation. */
     fun cancel(key: String) = onMain {
+        val cancelled=queue.filter {it.key==key}+listOfNotNull(active?.takeIf {it.key==key})
         latest.remove(key)
         queue.removeAll { it.key == key }
         if (active?.key == key) { active = null; disconnect(kill = true) }
         dispatch()
+        notifyCancelledGeoGebra(cancelled)
     }
 
     fun cancelPending() = onMain {
+        val cancelled=queue.toList()+listOfNotNull(active)
         queue.clear()
         latest.clear()
         val wasRunning = active != null
@@ -146,15 +158,18 @@ class CasEngine(context: Context) {
         // An idle service can be reused; restarting it for each keystroke adds
         // process startup, native library loading, and the reconnect delay.
         if (wasRunning) disconnect(kill = true)
+        notifyCancelledGeoGebra(cancelled)
     }
 
     fun close() = onMain {
+        val cancelled=queue.toList()+listOfNotNull(active)
         closed = true
         queue.clear()
         latest.clear()
         readyCallbacks.clear()
         active = null
         disconnect(kill = true)
+        notifyCancelledGeoGebra(cancelled)
     }
 
     private fun connect() {
@@ -216,6 +231,7 @@ class CasEngine(context: Context) {
                     putLong("session", session)
                     putString("expression", request.input)
                     putStringArrayList("definitions", ArrayList(request.definitions))
+                    putBoolean("geoGebra", request.geoGebra)
                 }
             }) ?: throw android.os.RemoteException("CAS disconnected")
             requestTimeout = Runnable {
@@ -273,6 +289,10 @@ class CasEngine(context: Context) {
             latest.remove(request.key)
             request.callback(result)
         }
+    }
+
+    private fun notifyCancelledGeoGebra(requests: List<Request>) {
+        requests.filter {it.geoGebra}.forEach {it.callback(CasResult(it.input,"",error="Calculation cancelled"))}
     }
 
     private fun onMain(action: () -> Unit) {

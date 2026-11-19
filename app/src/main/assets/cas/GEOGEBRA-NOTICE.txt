@@ -1,0 +1,21 @@
+GeoGebra native 3D viewport
+
+This application compiles GeoGebra 5.4.920.0 source code to JVM/Android bytecode
+and executes its native OpenGL rendering pipeline. No browser runtime is used.
+
+Upstream: https://github.com/geogebra/geogebra
+Revision: dbbd9fb17f4f58f266e9b33c88fc34c6584f379b
+Copyright GeoGebra GmbH and the original authors named in each source file.
+GeoGebra files carry EUPL 1.2 and/or GPL notices; the overall GeoGebra package
+also has separate non-commercial terms at https://www.geogebra.org/license.
+The bundled source archive preserves the original per-file notices. See the
+EUPL, GPL, ReTeX, OpenJDK Classpath, font and Lucide license texts beside this file.
+
+Corresponding original sources and a SHA-256 manifest are included in the
+application source tree under third_party/geogebra/. Native platform bindings
+are in geogebra/src/main/java/ and app/desktop native plot platform directories.
+
+ReTeX math fonts and layout: GeoGebra's pinned renderer-base/renderer-desktop.
+Plus Jakarta Sans UI fonts: SIL Open Font License, 1.1.
+Lucide 0.546.0 viewport icons: ISC, with the original Feather MIT portions.
+Desktop OpenGL: JOGL/GlueGen 2.6.0, https://jogamp.org/ (BSD-style licenses).

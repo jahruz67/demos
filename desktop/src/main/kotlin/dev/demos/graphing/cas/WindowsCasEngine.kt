@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 @Serializable
-internal data class CasRequest(val input: String, val definitions: List<String>)
+internal data class CasRequest(val input: String, val definitions: List<String>, val geoGebra: Boolean = false)
 
 /** One serialized native worker at a time. A hung or cancelled evaluation is killed. */
 class CasEngine {
@@ -29,25 +29,38 @@ class CasEngine {
     fun evaluate(key: String, expression: String, onResult: (CasResult) -> Unit) = evaluate(key, expression, emptyList(), onResult)
 
     fun evaluate(key: String, expression: String, definitions: List<String>, onResult: (CasResult) -> Unit) {
+        enqueue(key, expression, definitions, false, onResult)
+    }
+
+    internal fun evaluateGeoGebra(key: String, expression: String, initialization: List<String>, onResult: (CasResult) -> Unit) {
+        enqueue(key, expression, initialization, true, onResult)
+    }
+
+    private fun enqueue(key: String, expression: String, definitions: List<String>, geoGebra: Boolean, onResult: (CasResult) -> Unit) {
         cancel(key)
         jobs[key] = scope.launch {
             val result = try {
-                CasSyntax.prepare(expression)
-                serial.withLock { withContext(Dispatchers.IO) { calculate(key, expression, definitions) } }
+                if (geoGebra) require(expression.length + definitions.sumOf { it.length } <= 500_000) { "CAS request is too large" }
+                else CasSyntax.prepare(expression)
+                serial.withLock { withContext(Dispatchers.IO) { calculate(key, expression, definitions, geoGebra) } }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { CasResult(expression, "", error = failure.message ?: "CAS failed") }
             ensureActive()
             onResult(result)
+        }.also {job->
+            if(geoGebra)job.invokeOnCompletion {cause->
+                if(cause is CancellationException)onResult(CasResult(expression,"",error="Calculation cancelled"))
+            }
         }
     }
 
-    private fun calculate(key: String, expression: String, definitions: List<String>): CasResult {
+    private fun calculate(key: String, expression: String, definitions: List<String>, geoGebra: Boolean): CasResult {
         val temporary = File(WindowsRuntime.dataDirectory, "cas").apply { check(mkdirs() || isDirectory) }
         val request = File.createTempFile("request-", ".json", temporary)
         val result = File.createTempFile("result-", ".json", temporary)
         var process: Process? = null
         try {
-            request.writeText(Json.encodeToString(CasRequest(expression, definitions)))
+            request.writeText(Json.encodeToString(CasRequest(expression, definitions, geoGebra)))
             val builder = ProcessBuilder(WindowsRuntime.workerCommand(request, result))
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD)
             builder.environment()["PATH"] = WindowsRuntime.nativeDirectory.absolutePath + File.pathSeparator + builder.environment()["PATH"].orEmpty()
@@ -82,7 +95,10 @@ internal fun runCasWorker(request: File, result: File) {
     System.setProperty("demos.native.dir", WindowsRuntime.nativeDirectory.absolutePath)
     require(request.length() in 1..5_000_000)
     val input = Json.decodeFromString<CasRequest>(request.readText())
-    val evaluated = try { NativeGiac.evaluate(input.input, input.definitions) }
+    val evaluated = try {
+        if (input.geoGebra) NativeGiac.evaluateGeoGebra(input.input, input.definitions)
+        else NativeGiac.evaluate(input.input, input.definitions)
+    }
     catch (failure: Throwable) { CasResult(input.input, "", error = failure.message ?: "CAS could not start") }
     result.writeText(Json.encodeToString(evaluated))
 }

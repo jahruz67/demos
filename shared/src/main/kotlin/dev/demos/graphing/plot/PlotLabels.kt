@@ -15,9 +15,10 @@ internal class PlotLabels(private val measurer: TextMeasurer, private val densit
     fun measureText(text: String) = layout(text).size.width.toFloat()
 }
 
-internal fun DrawScope.drawTextWithHalo(text: String, x: Float, y: Float, labels: PlotLabels, density: Float, color: Color = Color.Black) {
+internal fun DrawScope.drawTextWithHalo(text: String, x: Float, y: Float, labels: PlotLabels, density: Float, color: Color = Color.Black,
+    haloColor: Color = Color.White) {
     val layout = labels.layout(text)
     val origin = Offset(x, y - layout.firstBaseline)
-    drawText(layout, Color.White, origin, drawStyle = Stroke(3 * density))
+    drawText(layout, haloColor, origin, drawStyle = Stroke(3 * density))
     drawText(layout, color, origin)
 }

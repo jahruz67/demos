@@ -48,49 +48,6 @@ class PlotGeometryTest {
         assertTrue(geometry.strokes.isEmpty())
         assertTrue(geometry.fills.isEmpty())
     }
-    @Test fun bareExpressionInXAndYProducesA3DSurface() {
-        val p=program("y√x − y² −2x +7y")
-        val relation=p.relations.single()
-        assertEquals(PlotKind.XY_FIELD,relation.kind)
-        val vertices=PlotGeometry.sample3D(p).first { it.primitive==Mesh3D.TRIANGLES }.vertices
-        assertTrue(vertices.isNotEmpty())
-        val zValues=HashSet<Float>()
-        for(i in vertices.indices step 6) {
-            val x=vertices[i].toDouble();val y=vertices[i+1].toDouble();val z=vertices[i+2].toDouble()
-            assertEquals(z,relation.expressions.single().evaluate(mapOf("x" to x,"y" to y)),1e-4)
-            assertTrue(x>=0.0)
-            zValues.add(vertices[i+2])
-        }
-        assertTrue(zValues.size>10)
-    }
-    @Test fun implicitSphereProducesFiniteTrianglesNearRadiusThree() {
-        val meshes=PlotGeometry.sample3D(program("x^2+y^2+z^2=9"))
-        val vertices=meshes.single().vertices
-        assertTrue(vertices.size>1000)
-        for(i in vertices.indices step 6) {
-            val x=vertices[i];val y=vertices[i+1];val z=vertices[i+2]
-            assertTrue(x.isFinite() && y.isFinite() && z.isFinite())
-            assertEquals(3.0,sqrt((x*x+y*y+z*z).toDouble()),0.04)
-            val normalLength=sqrt((vertices[i+3].pow(2)+vertices[i+4].pow(2)+vertices[i+5].pow(2)).toDouble())
-            assertEquals(1.0,normalLength,1e-5)
-        }
-    }
-    @Test fun twoDimensionalRelationBecomesCylinderIn3D() {
-        val vertices=PlotGeometry.sample3D(program("y=x^2")).first { it.primitive==Mesh3D.TRIANGLES }.vertices
-        assertTrue(vertices.isNotEmpty())
-        val zs=HashSet<Float>()
-        for(i in vertices.indices step 6) {
-            assertEquals((vertices[i]*vertices[i]).toDouble(),vertices[i+1].toDouble(),1e-5)
-            zs.add(vertices[i+2])
-        }
-        assertTrue(zs.size>10)
-    }
-    @Test fun parametricSurfaceAndCancellation() {
-        val p=program("(u,v,u^2+v^2)")
-        assertEquals(PlotKind.PARAMETRIC_SURFACE,p.relations.single().kind)
-        assertTrue(PlotGeometry.sample3D(p).first { it.primitive==Mesh3D.TRIANGLES }.vertices.isNotEmpty())
-        assertTrue(PlotGeometry.sample3D(p,cancelled={true}).isEmpty())
-    }
     @Test fun inequalityProducesShadedRegions() {
         assertTrue(PlotGeometry.sample2D(program("y<x^2"),Viewport()).fills.isNotEmpty())
         assertTrue(PlotGeometry.sample2D(program("x^2+y^2<9"),Viewport()).fills.isNotEmpty())
@@ -105,14 +62,11 @@ class PlotGeometryTest {
         assertEquals(3,tuple.strokes.size)
         assertTrue(tuple.strokes.all {it.coordinates[1]==5f})
     }
-    @Test fun configurableParameterAndImplicitBoundsAreHonored() {
+    @Test fun configurableParameterBoundsAreHonored() {
         val p=PlotProgram.compile(listOf(PlotExpression(1,"(t,t^2)",0)),PlotSettings(tMin=2.0,tMax=3.0))
         val curve=PlotGeometry.sample2D(p,Viewport()).strokes.single().coordinates
         assertEquals(2.0,curve[0].toDouble(),0.0)
         assertEquals(3.0,curve[curve.size-2].toDouble(),0.0)
-        val shiftedSphere=PlotProgram.compile(listOf(PlotExpression(1,"(x-20)^2+y^2+z^2=9",0)),PlotSettings(xMin=15.0,xMax=25.0))
-        val mesh=PlotGeometry.sample3D(shiftedSphere).single().vertices
-        assertTrue(mesh.isNotEmpty())
-        for(i in mesh.indices step 6) assertTrue(mesh[i] in 16.9f..23.1f)
+
     }
 }

@@ -7,7 +7,7 @@ import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** Native exports wait for the shared sampling/rendering pipeline and its drawn frame. */
+/** Exports wait for the native sampling/rendering pipeline and its drawn frame. */
 class GraphRenderState {
     internal var ready by mutableStateOf(false)
 

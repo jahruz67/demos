@@ -2,7 +2,6 @@ package dev.demos.graphing.plot
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -10,13 +9,13 @@ import androidx.compose.foundation.gestures.calculateCentroidSize
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -32,21 +31,16 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import dev.demos.graphing.ui.rememberImageLoader
 import dev.demos.graphing.ui.parseImageData
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import dev.demos.graphing.ui.DemosColors
 import dev.demos.graphing.ui.GraphControl
 import dev.demos.graphing.ui.interfaceTextStyle
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
@@ -57,7 +51,29 @@ import kotlin.math.*
 
 @Composable
 fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSettings=PlotSettings(),modifier:Modifier=Modifier,showControls:Boolean=true,
-    renderState:GraphRenderState=remember {GraphRenderState()},interactive:Boolean=true) {
+    renderState:GraphRenderState=remember {GraphRenderState()},interactive:Boolean=true,
+    on3DSettingsChange:(Viewport3DSettings)->Unit={},camera3D:GeoGebraCamera?=null) {
+    val views = rememberSaveableStateHolder()
+    var hasMounted3D by remember { mutableStateOf(is3D) }
+    if (is3D) hasMounted3D = true
+    val dormantRendering = remember { GraphRenderState() }
+    Box(modifier) {
+        if (hasMounted3D) key(camera3D) { views.SaveableStateProvider("3d") {
+            GeoGebraViewport3D(expressions, settings,
+                Modifier.fillMaxSize().graphicsLayer { alpha = if (is3D) 1f else 0f },
+                showControls && is3D, if (is3D) renderState else dormantRendering,
+                interactive && is3D, on3DSettingsChange, active = is3D, cameraState = camera3D)
+        }
+        }
+        if (!is3D) views.SaveableStateProvider("2d") {
+            NativePlot2D(expressions,settings,Modifier.fillMaxSize(),showControls,renderState,interactive)
+        }
+    }
+}
+
+@Composable
+private fun NativePlot2D(expressions:List<PlotExpression>,settings:PlotSettings,modifier:Modifier,
+    showControls:Boolean,renderState:GraphRenderState,interactive:Boolean) {
     val imageSources = expressions.mapNotNull { parseImageData(it.text) }
     val loadImage = rememberImageLoader()
     val imageUris = imageSources.map { it.uri }.distinct()
@@ -98,15 +114,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
         zoom2DTarget=null
     }
     var geometry by remember {mutableStateOf(Geometry2D())}
-    var meshes by remember {mutableStateOf(emptyList<Mesh3D>())}
-    var meshesReady by remember {mutableStateOf(false)}
     var sampledInput by remember {mutableStateOf<PlotSamplingInput?>(null)}
-    var rasterReady by remember {mutableStateOf(false)}
-    val cameraState=rememberSaveable(saver=GraphCameraState.Saver) {GraphCameraState()}
-    var zoom3D by rememberSaveable {mutableIntStateOf(0)}
-    var mouseInput by remember {mutableStateOf(false)}
-    var inspectedPoint by remember {mutableStateOf<String?>(null)}
-    var resetCounter by rememberSaveable {mutableIntStateOf(0)}
     fun reset2D() {
         zoom2DTarget=null
         trace=null
@@ -129,30 +137,21 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     val compiledPlot by produceState<CompiledPlot?>(null,plotInput) {
         value=withContext(Dispatchers.Default) {CompiledPlot(plotInput,PlotProgram.compile(expressions.filter { parseImageData(it.text) == null },settings))}
     }
-    val samplingInput=compiledPlot?.let {PlotSamplingInput(it,is3D,if(is3D) null else view,if(is3D) null else size.width.coerceIn(400,1800))}
+    val samplingInput=compiledPlot?.let {PlotSamplingInput(it,view,size.width.coerceIn(400,1800))}
     LaunchedEffect(samplingInput) {
         val input=samplingInput?:return@LaunchedEffect
         val compiled=input.compiled.program
         // Sampling mutates its context. Each pass owns a context even when a
         // cancelled pass is still winding down on a different worker thread.
         val sampling=compiled.copy(context=EvaluationContext(compiled.context.constants,compiled.context.functions,compiled.context.radians))
-        if(input.is3D) {
-            geometry=Geometry2D()
-            meshes=withContext(Dispatchers.Default) {
-                val context=currentCoroutineContext()
-                PlotGeometry.sample3D(sampling,cancelled={!context.isActive})
-            }
-            meshesReady=true
-        } else {
-            geometry=withContext(Dispatchers.Default) {
-                val context=currentCoroutineContext()
-                PlotGeometry.sample2D(sampling,requireNotNull(input.view),requireNotNull(input.width),cancelled={!context.isActive})
-            }
+        geometry=withContext(Dispatchers.Default) {
+            val context=currentCoroutineContext()
+            PlotGeometry.sample2D(sampling,input.view,input.width,cancelled={!context.isActive})
         }
         sampledInput=input
     }
     val ready=compiledPlot?.input==plotInput && samplingInput!=null && sampledInput==samplingInput &&
-        (is3D || (loadedImages?.uris==imageUris && zoom2DTarget==null)) && (!is3D || (meshesReady && rasterReady)) && size.width>1 && size.height>1
+        loadedImages?.uris==imageUris && zoom2DTarget==null && size.width>1 && size.height>1
     SideEffect {renderState.ready=ready}
     DisposableEffect(renderState) {onDispose {renderState.invalidate()}}
     val latestGeometry by rememberUpdatedState(geometry)
@@ -163,14 +162,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
     val density=plotDensity.density
     val measurer=rememberTextMeasurer()
     val labelPaint=remember(measurer,plotDensity) {PlotLabels(measurer,plotDensity)}
-    Box(modifier.background(Color.White).clipToBounds().pointerInput(Unit) {
-        awaitPointerEventScope {
-            while(true) {
-                val event=awaitPointerEvent(PointerEventPass.Initial)
-                event.changes.firstOrNull()?.let {mouseInput=it.type==PointerType.Mouse}
-            }
-        }
-    }.onGloballyPositioned { coordinates ->
+    Box(modifier.background(Color.White).clipToBounds().onGloballyPositioned { coordinates ->
         val nextSize = coordinates.size
         if (nextSize.width > 0 && nextSize.height > 0) {
             val origin = coordinates.positionInRoot()
@@ -192,20 +184,6 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
             size = nextSize
         }
     }) {
-        if(is3D) {
-            if(meshesReady) PlotSurface3D(meshes,settings,resetCounter,cameraState,zoom3D,interactive,
-                onReady={rasterReady=it}) {inspectedPoint=it}
-            if(showControls && settings.showAxes) Row(Modifier.align(Alignment.BottomStart).padding(10.dp)
-                .background(DemosColors.Paper.copy(alpha = .94f),RoundedCornerShape(8.dp))
-                .border(1.dp,DemosColors.Border,RoundedCornerShape(8.dp)).padding(horizontal=8.dp,vertical=5.dp)
-                .semantics { contentDescription="Axis colors: x red, y green, z blue" }, horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                graphAxisColors.forEachIndexed { index, color ->
-                    BasicText("xyz"[index].toString(),style=interfaceTextStyle(12.sp).copy(color=Color(color)))
-                }
-            }
-            if(showControls) BasicText(if(mouseInput) "Left-drag rotate · Right/middle-drag pan · Scroll zoom" else "Drag to rotate · Pinch to zoom · Two-finger pan",Modifier.align(Alignment.BottomCenter).padding(8.dp),style=interfaceTextStyle(11.sp).copy(color=DemosColors.Muted))
-            inspectedPoint?.let {BasicText(it,Modifier.align(Alignment.TopStart).padding(8.dp).background(DemosColors.Paper,RoundedCornerShape(8.dp)).border(1.dp,DemosColors.Border,RoundedCornerShape(8.dp)).padding(8.dp),style=interfaceTextStyle(16.sp).copy(color=DemosColors.Ink))}
-        } else {
             Canvas(Modifier.fillMaxSize()
                 .pointerInput(interactive) {
                     if(!interactive) return@pointerInput
@@ -440,28 +418,12 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
                     drawTextWithHalo(text,left+9*density,top+23*density,labelPaint,density)
                 }
             }
-        }
-            if(showControls) Column(Modifier.align(Alignment.TopEnd).padding(top=60.dp,end=6.dp),verticalArrangement=Arrangement.spacedBy(5.dp)) {
-            if(is3D || center!=Offset.Zero || abs(viewWidth-20.0)>1e-9 || viewHeightOverride!=null) {
-                PlotButton("⌂","Reset graph view") {reset2D();trace=null;inspectedPoint=null;resetCounter++}
+        if(showControls) Column(Modifier.align(Alignment.TopEnd).padding(top=60.dp,end=6.dp),verticalArrangement=Arrangement.spacedBy(5.dp)) {
+            if(center!=Offset.Zero || abs(viewWidth-20.0)>1e-9 || viewHeightOverride!=null) {
+                PlotButton("⌂","Reset graph view") {reset2D();trace=null}
             }
-            if(is3D) {
-                PlotButton(if(cameraState.tool==Graph3DTool.Rotate) "↻" else "↔",
-                    if(cameraState.tool==Graph3DTool.Rotate) "Switch to pan tool" else "Switch to rotate tool") {
-                    cameraState.tool=if(cameraState.tool==Graph3DTool.Rotate) Graph3DTool.Pan else Graph3DTool.Rotate
-                }
-                PlotButton("□","Top view") {cameraState.requestView(Graph3DView.XY)}
-                PlotButton("▱","Front view") {cameraState.requestView(Graph3DView.XZ)}
-                PlotButton("▯","Side view") {cameraState.requestView(Graph3DView.YZ)}
-                PlotButton(if(cameraState.spinning) "Ⅱ" else "↻",if(cameraState.spinning) "Stop rotation" else "Standard view") {
-                    cameraState.requestView(if(cameraState.spinning) Graph3DView.Stop else Graph3DView.Standard)
-                }
-                PlotButton("+","Zoom in") {zoom3D++}
-                PlotButton("−","Zoom out") {zoom3D--}
-            } else {
-                PlotButton("+","Zoom in") {zoom2D(1.3f,Offset(size.width/2f,size.height/2f))}
-                PlotButton("−","Zoom out") {zoom2D(1/1.3f,Offset(size.width/2f,size.height/2f))}
-            }
+            PlotButton("+","Zoom in") {zoom2D(1.3f,Offset(size.width/2f,size.height/2f))}
+            PlotButton("−","Zoom out") {zoom2D(1/1.3f,Offset(size.width/2f,size.height/2f))}
         }
     }
 }
@@ -491,7 +453,7 @@ fun GraphPlot(expressions:List<PlotExpression>,is3D:Boolean,settings:PlotSetting
 private data class PlotImages(val uris:List<String>,val bitmaps:Map<String,ImageBitmap>)
 private data class PlotInput(val expressions:List<PlotExpression>,val settings:PlotSettings)
 private data class CompiledPlot(val input:PlotInput,val program:PlotProgram)
-private data class PlotSamplingInput(val compiled:CompiledPlot,val is3D:Boolean,val view:Viewport?,val width:Int?)
+private data class PlotSamplingInput(val compiled:CompiledPlot,val view:Viewport,val width:Int)
 
 private fun niceStep(target:Double):Double {
     if(!target.isFinite() || target<=0.0) return 1.0

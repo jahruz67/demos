@@ -2,7 +2,11 @@ package dev.demos.graphing.plot
 
 import dev.demos.graphing.math.*
 
-data class PlotExpression(val id: Long, val text: String, val color: Int)
+data class PlotExpression(val id: Long, val text: String, val color: Int,val style: PlotStyle = PlotStyle())
+/** Viewport style values use the same defaults and units as geographer's ExpressionItem. */
+@kotlinx.serialization.Serializable
+data class PlotStyle(val lineStyle: String = "solid",val lineWidth: Double = 2.5,val lineOpacity: Double = .9,
+    val pointStyle: String = "point",val pointSize: Int = 5,val showLabel: Boolean = false,val labelText: String = "")
 data class PlotSettings(
     val showAxes: Boolean = true,
     val showGrid: Boolean = true,
@@ -74,18 +78,20 @@ data class PlotProgram(val relations:List<PlotRelation>,val context:EvaluationCo
                         val functionSymbols=symbols.copy(variables=symbols.variables+parameters)
                         functions[name]=NumericFunction(parameters,NumericCompiler.compile(definition.body,settings.radians,functionSymbols))
                         if(parameters==listOf("x")) relations.add(PlotRelation(expression.id,expression.color,PlotKind.Y_FUNCTION,listOf(NumericCompiler.compile("$name(x)",settings.radians,symbols))))
+                        if(parameters==listOf("x","y")) relations.add(PlotRelation(expression.id,expression.color,PlotKind.Z_SURFACE,listOf(NumericCompiler.compile("$name(x,y)",settings.radians,symbols))))
                         continue
                     }
                     val relation=findRelation(s)
                     val lhs=relation?.let {s.substring(0,it.first).trim()}
                     val op=relation?.second
                     val rhs=relation?.let {s.substring(it.first+it.second.length).trim()}
-                    if(definition!=null && parameters==null && definition.name !in setOf("x","y","z","r","theta")) {
+                    val assignedTuple=definition?.takeIf {it.parameters==null}?.body?.let(::splitTuple)
+                    if(definition!=null && parameters==null && assignedTuple==null && definition.name !in setOf("x","y","z","r","theta")) {
                         if(definition.name !in settings.parameters) assignments.add(definition.name to NumericCompiler.compile(definition.body,settings.radians,symbols))
                         continue
                     }
                     fun compiled(v:String)=NumericCompiler.compile(v,settings.radians,symbols)
-                    val tuple=splitTuple(s)
+                    val tuple=assignedTuple?:splitTuple(s)
                     val item=when {
                         tuple!=null -> {
                             val nodes=tuple.map(::compiled)

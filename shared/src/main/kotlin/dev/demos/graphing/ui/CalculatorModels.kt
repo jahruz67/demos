@@ -69,7 +69,7 @@ data class CalculatorUiState(
     val showAxes3D: Boolean = true,
     val bounds3D: GraphBounds = GraphBounds(),
     val appearance2D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(),
-    val appearance3D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(),
+    val appearance3D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(xLabel="",yLabel="",zLabel=""),
     val precisionDigits: Int = 15,
     val complexMode: Boolean = false,
     val statusMessage: String? = null,
@@ -123,6 +123,7 @@ sealed interface CalculatorAction {
     data class SetAxes(val enabled: Boolean) : CalculatorAction
     data class SetBounds(val bounds: GraphBounds) : CalculatorAction
     data class SetAppearance(val appearance: dev.demos.graphing.plot.GraphAppearance) : CalculatorAction
+    data class SetViewport3D(val settings: dev.demos.graphing.plot.Viewport3DSettings) : CalculatorAction
     data class SetPrecisionDigits(val digits: Int) : CalculatorAction
     data class SetComplexMode(val enabled: Boolean) : CalculatorAction
     data class SetSlider(val name: String, val value: Double) : CalculatorAction

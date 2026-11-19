@@ -46,6 +46,29 @@ class CalculatorController(
     private val preferences: CalculatorPreferences,
     private val viewModelScope: CoroutineScope,
 ) {
+    internal var viewport3D = newViewportCamera()
+        private set
+
+    private fun newViewportCamera(xml: String = "",scene: String = "") = dev.demos.graphing.plot.GeoGebraCamera().apply {
+        this.xml=xml
+        this.scene=scene
+        cas=dev.demos.graphing.geogebra.NativeCas { expression, initialization ->
+            val result=java.util.concurrent.CompletableFuture<CasResult>()
+            val key="viewport-cas-${UUID.randomUUID()}"
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                engine.evaluateGeoGebra(key,expression,initialization) {result.complete(it)}
+            }
+            try {
+                val evaluated=result.get(25,java.util.concurrent.TimeUnit.SECONDS)
+                check(evaluated.error==null){evaluated.error.orEmpty()}
+                evaluated.exact
+            } finally {
+                viewModelScope.launch(Dispatchers.Main.immediate) {engine.cancel(key)}
+            }
+        }
+    }
+
+
     private val _state = MutableStateFlow(CalculatorUiState(
         rows = listOf(newRow(1)), activeId = 1, keyboardVisible = true,
     ))
@@ -211,13 +234,13 @@ class CalculatorController(
             CalculatorAction.Undo -> if (undo.isNotEmpty()) {
                 redo.addLast(document())
                 stopAnimations()
-                applyDocument(undo.removeLast(), dirty = true)
+                applyDocument(undo.removeLast(), dirty = true, restoreViewport = false)
                 changed()
             }
             CalculatorAction.Redo -> if (redo.isNotEmpty()) {
                 undo.addLast(document())
                 stopAnimations()
-                applyDocument(redo.removeLast(), dirty = true)
+                applyDocument(redo.removeLast(), dirty = true, restoreViewport = false)
                 changed()
             }
             CalculatorAction.Toggle3D -> {
@@ -295,6 +318,26 @@ class CalculatorController(
             }
             is CalculatorAction.SetBounds -> {
                 rememberUndo(); _state.value = if (_state.value.is3D) _state.value.copy(bounds3D = action.bounds, dirty = true) else _state.value.copy(bounds = action.bounds, dirty = true); changed(evaluate = false)
+            }
+            is CalculatorAction.SetViewport3D -> {
+                val settings = action.settings
+                if (!_state.value.is3D || !settings.bounds3D.isValid()) return
+                rememberUndo()
+                val current = _state.value
+                val bounds = settings.bounds3D
+                _state.value = current.copy(
+                    dirty = true, showGrid3D = settings.showGrid,
+                    showAxes3D = settings.showXAxis || settings.showYAxis || settings.showZAxis,
+                    degreeMode = settings.angleMode == "deg",
+                    appearance3D = current.appearance3D.copy(
+                        xLabel = settings.xAxisLabel, yLabel = settings.yAxisLabel, zLabel = settings.zAxisLabel,
+                        labels = true, showXAxis = settings.showXAxis, showYAxis = settings.showYAxis,
+                        showZAxis = settings.showZAxis, reverseContrast = settings.reverseContrast,
+                    ),
+                    bounds3D = current.bounds3D.copy(xMin = bounds.xmin, xMax = bounds.xmax,
+                        yMin = bounds.ymin, yMax = bounds.ymax, zMin = bounds.zmin, zMax = bounds.zmax),
+                )
+                changed(evaluate = current.degreeMode != _state.value.degreeMode)
             }
             is CalculatorAction.SetAppearance -> {
                 if (!action.appearance.perspective.isFinite()) return
@@ -606,6 +649,8 @@ class CalculatorController(
         activeId = _state.value.activeId,
         expressions = _state.value.rows.map { StoredExpression(it.id, it.text, it.color, it.hidden, it.folderId) },
         sliderSettings = _state.value.sliderSettings,
+        viewport3DXml = viewport3D.xml.takeIf {it.isNotEmpty()},
+        viewport3DScene = viewport3D.scene.takeIf {it.isNotEmpty()},
         is3D = _state.value.is3D, degreeMode = _state.value.degreeMode,
         showGrid = _state.value.showGrid, showAxes = _state.value.showAxes,
         showGrid3D = _state.value.showGrid3D, showAxes3D = _state.value.showAxes3D,
@@ -617,7 +662,8 @@ class CalculatorController(
         viewBounds3D = with(_state.value.bounds3D) { mapOf("xMin" to xMin, "xMax" to xMax, "yMin" to yMin, "yMax" to yMax, "zMin" to zMin, "zMax" to zMax, "tMin" to tMin, "tMax" to tMax, "uMin" to uMin, "uMax" to uMax, "vMin" to vMin, "vMax" to vMax).filterValues { it != null }.mapValues { it.value!! } },
     )
 
-    private fun applyDocument(doc: GraphDocument, dirty: Boolean = false) {
+    private fun applyDocument(doc: GraphDocument, dirty: Boolean = false, restoreViewport: Boolean = true) {
+        if(restoreViewport)viewport3D=newViewportCamera(doc.viewport3DXml.orEmpty(),doc.viewport3DScene.orEmpty())
         generation++
         engine.cancelPending()
         completed.clear(); pending.clear(); requested.clear()

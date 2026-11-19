@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -110,6 +111,7 @@ fun CalculatorScreen(
     var keyboardTab by rememberSaveable { mutableStateOf("123") }
     val editorValues = remember { mutableStateMapOf<Long, TextFieldValue>() }
     var textInputFocused by remember { mutableStateOf(false) }
+    var graphFocused by remember { mutableStateOf(false) }
     var colorEditor by remember { mutableStateOf<ExpressionRow?>(null) }
     var showSave by remember { mutableStateOf(false) }
     var showLibrary by remember { mutableStateOf(false) }
@@ -323,6 +325,7 @@ fun CalculatorScreen(
                 else when {
                     event.isCtrlPressed && event.key == Key.Z -> { onAction(if (event.isShiftPressed) CalculatorAction.Redo else CalculatorAction.Undo); true }
                     event.isCtrlPressed && event.key == Key.S -> { showSave = true; true }
+                    state.is3D && graphFocused -> false
                     event.isCtrlPressed && event.key == Key.V && !textInputFocused -> { key("paste"); true }
                     tableEditing?.id == state.activeId && event.key == Key.DirectionUp -> moveTableCell(-1)
                     tableEditing?.id == state.activeId && event.key == Key.DirectionDown -> moveTableCell(1)
@@ -381,10 +384,10 @@ fun CalculatorScreen(
                     .coerceIn(minimumGraphHeight, maximumGraphHeight).value
             }
             val graphPanel: @Composable (Modifier) -> Unit = { modifier ->
-                Box(modifier) {
+                Box(modifier.onFocusChanged {graphFocused=it.hasFocus}.focusGroup()) {
                     graphState.SaveableStateProvider("graph") { graph(state.is3D, Modifier.fillMaxSize()) }
                     if (showGraphControls) {
-                        GraphTool(IconKind.Wrench, "Graph settings", Modifier.align(Alignment.TopEnd).padding(5.dp)) { graphSettings = true; showSettings = true }
+                        if (!state.is3D) GraphTool(IconKind.Wrench, "Graph settings", Modifier.align(Alignment.TopEnd).padding(5.dp)) { graphSettings = true; showSettings = true }
                         if (state.layout == CalculatorLayout.Graph) GraphTool(IconKind.Export, "Export graph", Modifier.align(Alignment.BottomEnd).padding(6.dp)) { showGraphExport = true }
                     }
                 }
@@ -1225,17 +1228,8 @@ private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDi
             }
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
             if (graphSettings) {
-            if (state.is3D) {
-                Text("Perspective", style = MaterialTheme.typography.titleSmall)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Orthographic", fontSize = 11.sp, color = Muted)
-                    Slider(appearance.perspective, { onAction(CalculatorAction.SetAppearance(appearance.copy(perspective = it))) },
-                        modifier = Modifier.weight(1f), valueRange = 0f..1f)
-                    Text("Perspective", fontSize = 11.sp, color = Muted)
-                }
-            }
             SettingsCheck(if (state.is3D) "XY plane grid" else "Grid", if (state.is3D) state.showGrid3D else state.showGrid) { onAction(CalculatorAction.SetGrid(it)) }
-            SettingsCheck(if (state.is3D) "3D axes and box" else "Axes", if (state.is3D) state.showAxes3D else state.showAxes) { onAction(CalculatorAction.SetAxes(it)) }
+            SettingsCheck(if (state.is3D) "3D axes" else "Axes", if (state.is3D) state.showAxes3D else state.showAxes) { onAction(CalculatorAction.SetAxes(it)) }
             SettingsCheck("Axis numbers", appearance.numbers) { onAction(CalculatorAction.SetAppearance(appearance.copy(numbers = it))) }
             SettingsCheck("Axis labels", appearance.labels) { onAction(CalculatorAction.SetAppearance(appearance.copy(labels = it))) }
             if (appearance.labels) repeat(if (state.is3D) 3 else 2) { axis ->

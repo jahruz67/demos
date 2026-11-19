@@ -4,11 +4,6 @@ import kotlinx.serialization.Serializable
 import kotlin.math.log10
 import kotlin.math.pow
 
-internal val graphAxisColors = listOf(0xFFD94A4A.toInt(), 0xFF3BA55C.toInt(), 0xFF4169DD.toInt())
-internal const val graphSurfaceColor: Int = -1719665775
-internal const val graphSectionColor: Int = 0xFF353039.toInt()
-internal const val graphPlaneColor: Int = 0x33D9D9D9
-
 @Serializable
 data class GraphAppearance(
     val xLabel: String = "x",
@@ -19,6 +14,10 @@ data class GraphAppearance(
     val perspective: Float = 0f,
     val numbers: Boolean = true,
     val labels: Boolean = true,
+    val showXAxis: Boolean = true,
+    val showYAxis: Boolean = true,
+    val showZAxis: Boolean = true,
+    val reverseContrast: Boolean = false,
 )
 
 internal fun axisCoordinate(value: Double, logarithmic: Boolean): Double =

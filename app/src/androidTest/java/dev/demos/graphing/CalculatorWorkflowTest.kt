@@ -43,6 +43,8 @@ class CalculatorWorkflowTest {
     @Test fun screenshotIntegralEvaluatesAndUndoRestoresInput() {
         edit("integrate(87x,x,0,100)")
         compose.waitUntil(30_000) { model.state.value.rows.first().result == "435000" }
+        // Independent edits must be outside the controller's 750 ms typing group.
+        Thread.sleep(800)
         edit("solve(x^2-2=0,x)")
         compose.waitUntil(30_000) { model.state.value.rows.first().result.contains("sqrt(2)") }
         compose.runOnIdle { model.onAction(CalculatorAction.Undo) }
@@ -65,10 +67,26 @@ class CalculatorWorkflowTest {
         compose.runOnIdle {
             model.onAction(CalculatorAction.SetSlider("C", 4.0))
             model.onAction(CalculatorAction.Toggle3D)
+        }
+        compose.waitUntil(30_000) {model.calculator.viewport3D.xml.contains("coordSystem")}
+        val originalCamera=model.calculator.viewport3D.xml
+        compose.onNodeWithContentDescription("Zoom in").performClick()
+        compose.waitUntil(30_000) {model.calculator.viewport3D.xml!=originalCamera}
+        fun waitForStableCamera() {
+            var previous="";var changed=System.nanoTime()
+            compose.waitUntil(30_000) {
+                val current=model.calculator.viewport3D.xml
+                if(current!=previous){previous=current;changed=System.nanoTime()}
+                current.contains("coordSystem") && System.nanoTime()-changed>1_000_000_000L
+            }
+        }
+        waitForStableCamera()
+        compose.runOnIdle {
             model.onAction(CalculatorAction.Save("Workflow integration check"))
         }
         compose.waitUntil(10_000) { model.state.value.savedGraphs.any { it.title == "Workflow integration check" } }
         val id = model.state.value.savedGraphs.first { it.title == "Workflow integration check" }.id
+        val savedCamera=Regex("<coordSystem[^>]+>").find(GraphRepository(compose.activity).load(id).viewport3DXml!!)!!.value
         compose.runOnIdle { model.onAction(CalculatorAction.New) }
         compose.waitUntil(10_000) { model.state.value.rows.first().text.isEmpty() }
         compose.runOnIdle { model.onAction(CalculatorAction.Open(id)) }
@@ -77,6 +95,8 @@ class CalculatorWorkflowTest {
         assertEquals("integrate(x,x)", model.state.value.rows.first().text)
         compose.waitUntil(30_000) { model.state.value.sliders.any { it.name == "C" } }
         assertEquals(4.0, model.state.value.sliders.first { it.name == "C" }.value, 0.0)
+        waitForStableCamera()
+        assertEquals(savedCamera,Regex("<coordSystem[^>]+>").find(model.calculator.viewport3D.xml)!!.value)
         GraphRepository(compose.activity).delete(id)
     }
 

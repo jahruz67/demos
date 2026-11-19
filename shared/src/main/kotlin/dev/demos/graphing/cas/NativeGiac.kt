@@ -72,6 +72,24 @@ internal object NativeGiac {
         } finally { giacJNI.delete_context(context) }
     }
 
+    /** Trusted GeoGebra protocol: preserve its Giac syntax, initialization and output. */
+    fun evaluateGeoGebra(input: String, initialization: List<String>): CasResult {
+        load()
+        require(input.length + initialization.sumOf { it.length } <= 500_000) { "CAS request is too large" }
+        val context = giacJNI.new_context__SWIG_0()
+        check(context != 0L) { "Could not create the CAS context" }
+        try {
+            initialization.forEach { command ->
+                val value = evaluatePointer(command, context)
+                giacJNI.delete_gen(value)
+            }
+            val value = evaluatePointer(input, context)
+            try {
+                return CasResult(input, giacJNI.gen_print__SWIG_0(value, null, context, null))
+            } finally { giacJNI.delete_gen(value) }
+        } finally { giacJNI.delete_context(context) }
+    }
+
     private fun evaluatePointer(expression: String, context: Long): Long {
         val parsed = giacJNI.new_gen__SWIG_25(expression, context, null)
         check(parsed != 0L) { "Could not parse the expression" }

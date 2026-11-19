@@ -46,7 +46,8 @@ internal fun CalculatorApp(
                         uMin = bounds.uMin, uMax = bounds.uMax, vMin = bounds.vMin, vMax = bounds.vMax,
                     ),
                     modifier = plotModifier.then(graphModifier), showControls = showGraphControls,
-                    renderState = renderState, interactive = showGraphControls)
+                    renderState = renderState, interactive = showGraphControls, camera3D = controller.viewport3D,
+                    on3DSettingsChange = { controller.onAction(CalculatorAction.SetViewport3D(it)) })
             }
         }
     }
