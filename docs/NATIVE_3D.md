@@ -52,6 +52,9 @@ rotation-speed sampling across the worker queue. A final pending camera step
 is applied before release, so a batch of moves cannot be lost when spin starts
 or stops. Continuous rotation remains an upstream animation and does not block
 graph export. Idle views stop rendering after pending updates settle.
+Each wheel event refreshes 3D picking at its own cursor position before zooming,
+including when desktop hover events are missing or coalesced. The original
+center fallback remains when no valid object or plane is under the cursor.
 
 ## Reference details deliberately retained
 

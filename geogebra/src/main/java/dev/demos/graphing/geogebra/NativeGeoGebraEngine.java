@@ -85,7 +85,15 @@ public final class NativeGeoGebraEngine implements AutoCloseable {
         }
         } finally {INPUT_TIME.remove();}
     }
-    public void wheel(int x,int y,double delta,boolean shiftOrMeta,boolean alt){controller.wrapMouseWheelMoved(x,y,delta,shiftOrMeta,alt);}
+    public void wheel(int x,int y,double delta,boolean shiftOrMeta,boolean alt){
+        // The 3D zoom animator anchors to the picked cursor in world space,
+        // rather than the x/y arguments of the shared wheel handler. Desktop
+        // wheel events can arrive without a preceding hover (or in its batch).
+        // Refresh picking at this event's location before choosing that anchor.
+        controller.wrapMouseMoved(new NativePointer(x,y,0,(shiftOrMeta?2:0)|(alt?1:0),1,false));
+        renderer.drawScene();
+        controller.wrapMouseWheelMoved(x,y,delta,shiftOrMeta,alt);
+    }
     public void twoTouchStart(double x1,double y1,double x2,double y2){controller.twoTouchStart(x1,y1,x2,y2);}
     public void twoTouchMove(double x1,double y1,double x2,double y2){
         // The browser applies the previous one-step camera animation between input

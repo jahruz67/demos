@@ -202,7 +202,7 @@ internal fun GeoGebraSurface(expressions: List<PlotExpression>,settings: PlotSet
                 } else if(down && pressed.isEmpty()) {
                     val pointer=NativePointer(position.x.roundToInt(),position.y.roundToInt(),button,flags,1,touch,change.uptimeMillis)
                     commands.submit {it.pointer(2,pointer)};down=false
-                } else if(event.changes.any {it.position!=it.previousPosition}) {
+                } else if(event.type==PointerEventType.Enter || event.changes.any {it.position!=it.previousPosition}) {
                     val pointer=NativePointer(position.x.roundToInt(),position.y.roundToInt(),button,flags,1,touch,change.uptimeMillis)
                     val action=if(down)1 else 3
                     commands.submit {it.pointer(action,pointer)}

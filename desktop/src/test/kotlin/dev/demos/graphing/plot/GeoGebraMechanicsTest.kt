@@ -8,6 +8,25 @@ import org.junit.Test
 import kotlin.math.roundToInt
 
 class GeoGebraMechanicsTest {
+    @Test fun wheelUsesItsEventPositionEvenWhenHoverIsStale() {
+        fun zoom(hoverX: Int,hoverY: Int): DoubleArray {
+            createGeoGebraGraphics().use {graphics->
+                graphics.resize(696,710,1f)
+                NativeGeoGebraEngine(graphics.text).use {engine->
+                    engine.initialize(graphics.gl,696,710)
+                    engine.bounds(-6.0,6.0,-6.0,6.0,-6.0,6.0)
+                    repeat(25){engine.draw();Thread.sleep(16)}
+                    engine.pointer(3,NativePointer(hoverX,hoverY,0,0,1,false));engine.draw()
+                    engine.wheel(450,390,-1.0,false,false)
+                    repeat(25){engine.draw();Thread.sleep(16)}
+                    return engine.camera()
+                }
+            }
+        }
+        val current=zoom(450,390)
+        assertTrue("Off-center zoom changes the view origin",current.drop(3).any {kotlin.math.abs(it)>1e-6})
+        assertArrayEquals("Wheel location must override the last hover location",current,zoom(180,280),1e-9)
+    }
     @Test fun savedNativeConstructionPreservesMovedObjectsWithoutRedefiningTheirRows() {
         createGeoGebraGraphics().use {graphics->
             graphics.resize(600,600,1f)
