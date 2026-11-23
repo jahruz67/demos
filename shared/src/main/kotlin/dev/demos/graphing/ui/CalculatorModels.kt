@@ -81,6 +81,7 @@ data class CalculatorUiState(
     val tableFits: Map<Long, dev.demos.graphing.math.RegressionFit> = emptyMap(),
     val documentRevision: Long = 0,
     val tableFitting: Set<Long> = emptySet(),
+    val decimalPlaces: Int = 3,
 )
 
 sealed interface CalculatorAction {
@@ -125,6 +126,7 @@ sealed interface CalculatorAction {
     data class SetAppearance(val appearance: dev.demos.graphing.plot.GraphAppearance) : CalculatorAction
     data class SetViewport3D(val settings: dev.demos.graphing.plot.Viewport3DSettings) : CalculatorAction
     data class SetPrecisionDigits(val digits: Int) : CalculatorAction
+    data class SetDecimalPlaces(val places: Int) : CalculatorAction
     data class SetComplexMode(val enabled: Boolean) : CalculatorAction
     data class SetSlider(val name: String, val value: Double) : CalculatorAction
     data class ToggleSlider(val name: String) : CalculatorAction

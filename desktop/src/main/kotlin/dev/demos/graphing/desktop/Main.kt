@@ -7,6 +7,7 @@ import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
@@ -21,6 +22,7 @@ import dev.demos.graphing.plot.GraphRenderState
 import dev.demos.graphing.ui.*
 import kotlinx.coroutines.*
 import java.io.File
+import kotlin.concurrent.thread
 
 fun main(args: Array<String>) {
     if (args.firstOrNull() == "--cas-worker") {
@@ -31,6 +33,12 @@ fun main(args: Array<String>) {
     StartupTrace.mark("main")
     System.setProperty("demos.native.dir", WindowsRuntime.nativeDirectory.absolutePath)
     application {
+        remember {
+            // Enumerate Windows fonts while the model and window are created.
+            thread(name = "demos-font-init", isDaemon = true) {
+                org.jetbrains.skia.FontMgr.default.matchFamilyStyle("Arial", org.jetbrains.skia.FontStyle.NORMAL)?.close()
+            }
+        }
         val scope = rememberCoroutineScope()
         val model = remember {
             CalculatorController(GraphRepository(WindowsRuntime.dataDirectory), CasEngine(), WindowsCalculatorPreferences(), scope)
@@ -38,7 +46,8 @@ fun main(args: Array<String>) {
         }
         val current by model.state.collectAsState()
         var closing by remember { mutableStateOf(false) }
-        Window(title = "${current.title} — Demos", state = rememberWindowState(width = 1080.dp, height = 760.dp),
+        Window(title = "${current.title} — Demos", icon = painterResource("demos.png"),
+            state = rememberWindowState(width = 1080.dp, height = 760.dp),
             onCloseRequest = {
                 if (!closing) {
                     closing = true

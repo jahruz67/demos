@@ -38,16 +38,25 @@ The EXE installer is written to `desktop/build/compose/binaries/main/exe/`. It i
 
 ## Startup measurement
 
-The packaged runtime includes a CDS archive and uses two JIT compiler threads to reduce startup contention while retaining full JVM optimization. Windows preferences initialize on the recovery IO thread.
+The packaged runtime includes a CDS archive and uses two JIT compiler threads to reduce startup contention while retaining full JVM optimization. Packaging augments the JDK's default archive with the Windows UI classes recorded in `desktop/startup.classlist`. The archive contains JDK classes only, so it remains valid after installation or application JAR changes. No app is launched during packaging. Windows preferences initialize on the recovery IO thread. Integer axis labels avoid initializing Java's general-purpose formatter on the first graph draw.
 
 Build the app image and measure three separate process launches:
 
 ```powershell
 .\gradlew.bat :desktop:createDistributable
-.\scripts\measure-windows-startup.ps1
+.\scripts\measure-windows-startup.ps1 -MaxStartupMs 2000
 ```
 
 The script measures launcher invocation through the first calculator draw returning to the window event queue, then closes each app. It does not clear the OS file cache or measure reboot-cold disk access. Recovery of large saved documents and graph sampling can continue after that first frame. Set `-Executable` to measure another app image or installed executable. Startup tracing is disabled unless `DEMOS_STARTUP_TRACE` names an output file.
+
+After major UI or dependency changes, refresh the generated startup profile, then rebuild the app image to regenerate its archive:
+
+```powershell
+.\scripts\measure-windows-startup.ps1 -Runs 1 -ClassList desktop\startup.classlist
+.\gradlew.bat :desktop:createDistributable
+```
+
+The profile contains JDK class names, not a binary archive. The archive is regenerated when the runtime or profile changes. The JVM falls back to ordinary class loading if it cannot use the archive.
 
 ## Continuous releases
 

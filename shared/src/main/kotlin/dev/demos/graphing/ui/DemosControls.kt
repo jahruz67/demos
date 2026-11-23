@@ -56,9 +56,9 @@ internal fun MenuControl(modifier: Modifier = Modifier, onClick: () -> Unit, con
 
 @Composable
 internal fun DisclosureHeader(title: String, expanded: Boolean, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(MaterialTheme.shapes.small)
+    Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).clip(MaterialTheme.shapes.small)
         .clickable(role = Role.Button, onClick = onClick)
-        .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }.padding(vertical = 8.dp),
+        .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }.padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         ChevronIcon(expanded, color = DemosColors.Muted)
         Text(title, style = MaterialTheme.typography.titleSmall)
@@ -85,17 +85,18 @@ internal fun ChevronIcon(expanded: Boolean = true, modifier: Modifier = Modifier
 
 @Composable
 internal fun CompactNumberField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier,
-    label: String? = null, placeholder: String = "", onFocus: (Boolean) -> Unit = {}) {
+    label: String? = null, placeholder: String = "", onFocus: (Boolean) -> Unit = {},
+    keyboardType: KeyboardType = KeyboardType.Decimal, isError: Boolean = false) {
     var focused by remember { mutableStateOf(false) }
     val style = interfaceTextStyle(14.sp).copy(color = DemosColors.Ink)
     BasicTextField(value, onValueChange, singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), textStyle = style,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType), textStyle = style,
         cursorBrush = SolidColor(DemosColors.Blue),
         modifier = modifier.heightIn(min = 36.dp).onFocusChanged { focused = it.isFocused; onFocus(it.isFocused) },
         decorationBox = { inner ->
             Column(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
                 .background(if (focused) DemosColors.BlueSoft else DemosColors.Surface)
-                .border(1.dp, if (focused) DemosColors.Blue else DemosColors.Border, MaterialTheme.shapes.small)
+                .border(1.dp, if (isError) DemosColors.Error else if (focused) DemosColors.Blue else DemosColors.Border, MaterialTheme.shapes.small)
                 .padding(horizontal = 8.dp, vertical = 7.dp)) {
                 if (label != null) Text(label, color = DemosColors.Muted, style = MaterialTheme.typography.labelSmall,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 4.dp))

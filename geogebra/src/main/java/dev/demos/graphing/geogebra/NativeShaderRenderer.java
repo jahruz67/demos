@@ -111,6 +111,11 @@ public class NativeShaderRenderer extends RendererImplShaders {
 
 	@Override
 	final protected void createVBOs() {
+		// Attribute enables survive the previous renderer in a reused GL context.
+		for (int attribute : new int[] {GLSL_ATTRIB_POSITION, GLSL_ATTRIB_NORMAL,
+				GLSL_ATTRIB_COLOR, GLSL_ATTRIB_TEXTURE}) {
+			gl.glDisableVertexAttribArray(attribute);
+		}
 		vboHandles = new int[GLSL_ATTRIB_SIZE];
 		gl.glGenBuffers(GLSL_ATTRIB_SIZE, vboHandles, 0);
 	}

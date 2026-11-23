@@ -52,7 +52,7 @@ internal class GeoGebraCommands {
         return applied
     }
 }
-private data class EngineInput(val expressions: List<PlotExpression>,val settings: PlotSettings)
+private data class EngineInput(val expressions: List<PlotExpression>,val settings: PlotSettings,val boundsResetCounter: Int)
 private data class EngineFrame(val image: ImageBitmap,val input: EngineInput,val size: IntSize,val animated: Boolean,val revision: Int)
 
 @Composable
@@ -64,7 +64,7 @@ internal fun GeoGebraSurface(expressions: List<PlotExpression>,settings: PlotSet
     var size by remember {mutableStateOf(IntSize.Zero)}
     val layout=referenceGeoGebraLayout(size,density,left,configuration.screenWidthDp,configuration.screenHeightDp)
     val latestLayout by rememberUpdatedState(layout)
-    val input=EngineInput(expressions,settings)
+    val input=EngineInput(expressions,settings,renderState.boundsReset3DCounter)
     val latestInput by rememberUpdatedState(input)
     val latestSize by rememberUpdatedState(size)
     val latestDensity by rememberUpdatedState(density)
@@ -112,7 +112,8 @@ internal fun GeoGebraSurface(expressions: List<PlotExpression>,settings: PlotSet
                                 engine.settings(display.showGrid,display.showXAxis,display.showYAxis,display.showZAxis)
                                 val appearance=next.settings.appearance
                                 engine.axisAppearance(appearance.numbers,appearance.labels,appearance.xLabel,appearance.yLabel,appearance.zLabel)
-                                if(applied?.settings?.viewport3DSettings()?.bounds3D!=display.bounds3D && (applied!=null || !restored)) {
+                                val resetBounds=applied!=null && applied.boundsResetCounter!=next.boundsResetCounter
+                                if(resetBounds || (applied?.settings?.viewport3DSettings()?.bounds3D!=display.bounds3D && (applied!=null || !restored))) {
                                     val b=display.bounds3D;engine.bounds(b.xmin,b.xmax,b.ymin,b.ymax,b.zmin,b.zmax)
                                 }
                                 adapter.sync(next.expressions,next.settings)

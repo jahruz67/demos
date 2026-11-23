@@ -121,11 +121,25 @@ compose.desktop {
     }
 }
 
+val startupClassList = layout.projectDirectory.file("startup.classlist")
 tasks.withType<AbstractJLinkTask>().configureEach {
     // Compose 1.10 exposes no DSL for this flag; jlink's CDS generator needs java.exe.
     @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
     stripNativeCommands.set(false)
     freeArgs.add("--generate-cds-archive")
+    inputs.file(startupClassList)
+    doLast {
+        val runtime = destinationDir.get().asFile
+        val classList = temporaryDir.resolve("startup.classlist")
+        // Archive JDK classes only, so installation paths and application JAR
+        // changes cannot invalidate sharing. Keep the standard core profile too.
+        classList.writeText(runtime.resolve("lib/classlist").readText() + "\n" + startupClassList.asFile.readText())
+        providers.exec {
+            commandLine(runtime.resolve("bin/java.exe").absolutePath, "-Xshare:dump",
+                "-XX:SharedClassListFile=${classList.absolutePath}",
+                "-XX:SharedArchiveFile=${runtime.resolve("bin/server/classes.jsa").absolutePath}")
+        }.result.get().assertNormalExitValue()
+    }
 }
 
 // Compose snapshots common/ and windows/ before creating the app image or installer.

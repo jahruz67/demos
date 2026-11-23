@@ -3,11 +3,11 @@ package dev.demos.graphing.math
 import dev.demos.graphing.cas.CasResult
 import java.math.BigDecimal
 import java.math.BigInteger
-import java.math.MathContext
+import java.math.RoundingMode
 
 /** Bounded, exact arithmetic without starting the native symbolic process. */
 object FastArithmetic {
-    fun evaluate(source: String, digits: Int): CasResult? {
+    fun evaluate(source: String, decimalPlaces: Int): CasResult? {
         if (source.length > 512) return null
         val normalized = runCatching { MathSyntax.explicitProducts(MathSyntax.normalize(source)) }.getOrNull() ?: return null
         if (normalized.any { it !in "0123456789.eE+-*/^() \t\n\r" }) return null
@@ -15,7 +15,7 @@ object FastArithmetic {
             val value = Parser(normalized).parse()
             val exact = if (value.d == BigInteger.ONE) value.n.toString() else "${value.n}/${value.d}"
             val approximate = if (value.d == BigInteger.ONE) "" else
-                BigDecimal(value.n).divide(BigDecimal(value.d), MathContext(digits.coerceIn(10, 1000)))
+                BigDecimal(value.n).divide(BigDecimal(value.d), decimalPlaces.coerceIn(0, 1000), RoundingMode.HALF_UP)
                     .stripTrailingZeros().toString()
             CasResult(source, exact, approximate)
         }.getOrNull()

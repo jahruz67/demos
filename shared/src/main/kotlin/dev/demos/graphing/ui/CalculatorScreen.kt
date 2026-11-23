@@ -26,7 +26,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -40,6 +39,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -50,10 +50,13 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -71,8 +74,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.BaselineShift
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -85,6 +86,7 @@ import kotlin.math.roundToInt
 import dev.demos.graphing.plot.PlotExpression
 import dev.demos.graphing.plot.PlotProgram
 import dev.demos.graphing.plot.PlotSettings
+import dev.demos.graphing.plot.GraphAppearance
 
 private val Blue = DemosColors.Blue
 private val Header = DemosColors.Header
@@ -104,6 +106,8 @@ fun CalculatorScreen(
     onAction: (CalculatorAction) -> Unit,
     showGraphControls: Boolean = true,
     onOpenLibrary: () -> Unit = {},
+    visibleBounds: () -> GraphBounds? = { null },
+    onResetBounds: () -> Unit = { onAction(CalculatorAction.SetBounds(GraphBounds())) },
     graph: @Composable (is3D: Boolean, modifier: Modifier) -> Unit,
 ) {
     val keyboardVisible = state.keyboardVisible
@@ -117,6 +121,8 @@ fun CalculatorScreen(
     var showLibrary by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var graphSettings by remember { mutableStateOf(false) }
+    var appSettingsAnchor by remember { mutableStateOf<Rect?>(null) }
+    var graphSettingsAnchor by remember { mutableStateOf<Rect?>(null) }
     var showMenu by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
@@ -126,6 +132,12 @@ fun CalculatorScreen(
     var tableValue by remember { mutableStateOf(TextFieldValue()) }
     val configuration = LocalAppConfiguration.current
     val density = LocalDensity.current
+    val focusManager = LocalFocusManager.current
+    fun toggleSettings(graph: Boolean) {
+        focusManager.clearFocus()
+        showSettings = !showSettings || graphSettings != graph
+        graphSettings = graph
+    }
     var measuredKeypadHeight by remember(configuration.screenWidthDp, configuration.screenHeightDp) { mutableStateOf(0.dp) }
     var reservedKeypadHeight by remember(configuration.screenWidthDp, configuration.screenHeightDp) { mutableStateOf(0.dp) }
     var resizedGraphHeightDp by rememberSaveable { mutableStateOf<Float?>(null) }
@@ -141,7 +153,8 @@ fun CalculatorScreen(
     val plotSources = state.rows.map { PlotExpression(it.id, it.text, it.color) }
     val plotParameters = state.sliders.associate { it.name to it.value }
     val graphableIds = remember(plotSources, plotParameters) {
-        PlotProgram.compile(plotSources, PlotSettings(parameters = plotParameters)).relations.map { it.id }.toSet()
+        if (plotSources.all { it.text.isBlank() }) emptySet()
+        else PlotProgram.compile(plotSources, PlotSettings(parameters = plotParameters)).relations.map { it.id }.toSet()
     }
 
     LaunchedEffect(state.rows.map { it.id }) {
@@ -350,7 +363,7 @@ fun CalculatorScreen(
             DropdownMenuItem(text = { Text("Save graph") }, onClick = { showSave = true; showMenu = false })
             DropdownMenuItem(text = { Text("Calculator fullscreen") }, onClick = { onAction(CalculatorAction.SetLayout(CalculatorLayout.Calculator)); showMenu = false })
             DropdownMenuItem(text = { Text("Graph fullscreen") }, onClick = { onAction(CalculatorAction.SetLayout(CalculatorLayout.Graph)); showMenu = false })
-            DropdownMenuItem(text = { Text("Settings") }, onClick = { graphSettings = false; showSettings = true; showMenu = false })
+            DropdownMenuItem(text = { Text("Settings") }, onClick = { toggleSettings(false); showMenu = false })
             DropdownMenuItem(text = { Text(if (editingList) "Finish editing expression list" else "Edit expression list") }, onClick = { editingList = !editingList; showMenu = false })
             HorizontalDivider()
             DropdownMenuItem(text = { Text("Export graph file") }, onClick = { onAction(CalculatorAction.ExportDocument); showMenu = false })
@@ -384,10 +397,19 @@ fun CalculatorScreen(
                     .coerceIn(minimumGraphHeight, maximumGraphHeight).value
             }
             val graphPanel: @Composable (Modifier) -> Unit = { modifier ->
-                Box(modifier.onFocusChanged {graphFocused=it.hasFocus}.focusGroup()) {
+                Box(modifier.onFocusChanged { graphFocused = it.hasFocus }.focusGroup().pointerInput(showSettings) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (showSettings && event.changes.any { it.pressed && !it.previousPressed }) focusManager.clearFocus()
+                        }
+                    }
+                }) {
                     graphState.SaveableStateProvider("graph") { graph(state.is3D, Modifier.fillMaxSize()) }
                     if (showGraphControls) {
-                        GraphTool(IconKind.Wrench, "Graph settings", Modifier.align(Alignment.TopEnd).padding(5.dp)) { graphSettings = true; showSettings = true }
+                        GraphTool(IconKind.Wrench, "Graph settings", Modifier.align(Alignment.TopEnd).padding(5.dp)
+                            .onGloballyPositioned { graphSettingsAnchor = it.boundsInWindow() }
+                            .semantics { stateDescription = if (showSettings && graphSettings) "Expanded" else "Collapsed" }) { toggleSettings(true) }
                         if (state.layout == CalculatorLayout.Graph) GraphTool(IconKind.Export, "Export graph", Modifier.align(Alignment.BottomEnd).padding(6.dp)) { showGraphExport = true }
                     }
                 }
@@ -398,7 +420,9 @@ fun CalculatorScreen(
                     onAdd = { showAddMenu = !showAddMenu }, onUndo = { onAction(CalculatorAction.Undo) },
                     onRedo = { onAction(CalculatorAction.Redo) },
                     onCollapse = { setKeyboardVisible(!keyboardVisible) },
-                    onSettings = { graphSettings = false; showSettings = true },
+                    onSettings = { toggleSettings(false) },
+                    settingsModifier = Modifier.onGloballyPositioned { appSettingsAnchor = it.boundsInWindow() }
+                        .semantics { stateDescription = if (showSettings && !graphSettings) "Expanded" else "Collapsed" },
                     fullscreen = state.layout == CalculatorLayout.Calculator,
                     onFullscreen = {
                         onAction(CalculatorAction.SetLayout(if (state.layout == CalculatorLayout.Calculator) CalculatorLayout.Split else CalculatorLayout.Calculator))
@@ -517,6 +541,7 @@ fun CalculatorScreen(
                                             slider = state.sliders.firstOrNull { slider -> runCatching { dev.demos.graphing.math.MathSyntax.definition(row.text)?.name == slider.name }.getOrDefault(false) },
                                             missingVariables = missingSliderVariables(row.text, state), onAction = onAction,
                                             defaultDecimal = state.defaultDecimal,
+                                            decimalPlaces = state.decimalPlaces,
                                             onSettingsFocus = { focused -> textInputFocused = focused; if (focused) setKeyboardVisible(false) },
                                         )
                                     }
@@ -588,7 +613,8 @@ fun CalculatorScreen(
         onAction(CalculatorAction.Save(title)); showSave = false
     }
     if (showLibrary) LibrarySheet(state.savedGraphs, { showLibrary = false }, onAction)
-    if (showSettings) SettingsSheet(state, graphSettings, { showSettings = false }, onAction)
+    if (showSettings) SettingsSheet(state, graphSettings, visibleBounds(),
+        if (graphSettings) graphSettingsAnchor else appSettingsAnchor, { showSettings = false }, onAction, onResetBounds)
     if (showHelp) HelpSheet { showHelp = false }
     colorEditor?.let { row -> ColorPaletteDialog(row.color, { colorEditor = null }) { color ->
         onAction(CalculatorAction.SetColor(row.id, color)); colorEditor = null
@@ -627,7 +653,8 @@ private fun CalculatorHeader(state: CalculatorUiState, onOpen: () -> Unit, onSav
 
 @Composable
 private fun ExpressionToolbar(canUndo: Boolean, canRedo: Boolean, keyboardVisible: Boolean, onAdd: () -> Unit, onUndo: () -> Unit, onRedo: () -> Unit, onCollapse: () -> Unit, fullscreen: Boolean, onFullscreen: () -> Unit,
-    addMenuExpanded: Boolean, onAddMenuDismiss: () -> Unit, onInsert: (String) -> Unit, onSettings: () -> Unit, modifier: Modifier = Modifier) {
+    addMenuExpanded: Boolean, onAddMenuDismiss: () -> Unit, onInsert: (String) -> Unit, onSettings: () -> Unit,
+    settingsModifier: Modifier = Modifier, modifier: Modifier = Modifier) {
     Row(modifier.fillMaxWidth().height(52.dp).background(DemosColors.Surface)
         .border(width = .5.dp, color = Border).padding(horizontal = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         Box {
@@ -646,14 +673,15 @@ private fun ExpressionToolbar(canUndo: Boolean, canRedo: Boolean, keyboardVisibl
         ToolIcon(IconKind.Redo, "Redo", Muted, onRedo, enabled = canRedo)
         Spacer(Modifier.weight(1f))
         ToolIcon(IconKind.Keyboard, if (keyboardVisible) "Hide keyboard" else "Show keyboard", if (keyboardVisible) Blue else Muted, onCollapse)
-        ToolIcon(IconKind.Settings, "Settings", Muted, onSettings)
+        ToolIcon(IconKind.Settings, "Settings", Muted, onSettings, modifier = settingsModifier)
         ToolIcon(IconKind.Fullscreen, if (fullscreen) "Exit calculator fullscreen" else "Calculator fullscreen", if (fullscreen) Blue else Muted, onFullscreen)
     }
 }
 
 @Composable
 private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, value: TextFieldValue, graphable: Boolean, onInput: (TextFieldValue) -> Unit, onInputFocus: (Boolean) -> Unit, onSelect: () -> Unit, onDelete: () -> Unit, onVisibility: () -> Unit, onColor: () -> Unit,
-    slider: SliderUi? = null, missingVariables: List<String> = emptyList(), onAction: (CalculatorAction) -> Unit, defaultDecimal: Boolean = true, onSettingsFocus: (Boolean) -> Unit = {}) {
+    slider: SliderUi? = null, missingVariables: List<String> = emptyList(), onAction: (CalculatorAction) -> Unit, defaultDecimal: Boolean = true,
+    decimalPlaces: Int = 3, onSettingsFocus: (Boolean) -> Unit = {}) {
     // Lazy rows can be restored after the global default changed while off screen.
     var decimal by rememberSaveable(row.id, defaultDecimal, stateSaver = listSaver<Boolean, Boolean>(
         save = { listOf(defaultDecimal, it) },
@@ -720,16 +748,17 @@ private fun ExpressionItem(row: ExpressionRow, number: Int, selected: Boolean, v
                 } else if (hasResult) {
                     val showingDecimal = row.result.isBlank() || decimal && row.approximate.isNotBlank()
                     val result = if (showingDecimal) row.approximate else row.result
+                    val displayedResult = remember(result, decimalPlaces) { formatResultNumber(result, decimalPlaces) }
                     Row(Modifier.fillMaxWidth().padding(top = 5.dp, end = 5.dp, bottom = 1.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         if (row.result.isNotBlank() && row.approximate.isNotBlank() && row.approximate != row.result) {
                             Text(if (showingDecimal) "≈" else "=", color = Muted, style = mathTextStyle(18.sp), modifier = Modifier.padding(end = 6.dp).clickable { decimal = !decimal })
                         } else Text(if (showingDecimal) "≈" else "=", color = Muted, style = mathTextStyle(18.sp), modifier = Modifier.padding(end = 6.dp))
                         Box(Modifier.weight(1f, fill = false).widthIn(max = 250.dp).clip(MaterialTheme.shapes.small).background(DemosColors.Surface).border(1.dp, Border, MaterialTheme.shapes.small)
                             .semantics { contentDescription = "Result $number" }
-                            .combinedClickable(onClick = { decimal = !decimal }, onLongClick = {
-                                platform.copy(result)
+                            .combinedClickable(onClick = { decimal = !decimal }, onLongClickLabel = "Copy answer", onLongClick = {
+                                platform.copy(displayedResult)
                             }).padding(horizontal = 8.dp, vertical = 4.dp).horizontalScroll(rememberScrollState())) {
-                            MathExpression(formatResultNumber(result), 19)
+                            MathExpression(displayedResult, 19)
                         }
                     }
                 }
@@ -831,11 +860,11 @@ private fun subscript(number: Int) = number.toString().map { "₀₁₂₃₄₅
 
 @Composable
 private fun KeyboardHeightControl(scale: Float, onChange: (Float) -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp),
+    Row(Modifier.fillMaxWidth().heightIn(min = 40.dp),
         horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
         Text("Keyboard height", style = MaterialTheme.typography.bodySmall, color = Muted)
         Slider(value = scale.coerceIn(.6f, 1.4f), onValueChange = onChange, valueRange = .6f..1.4f, steps = 15,
-            modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+            modifier = Modifier.weight(1f).height(32.dp).padding(horizontal = 6.dp)
                 .semantics { contentDescription = "Keyboard height" },
             colors = SliderDefaults.colors(thumbColor = Blue, activeTrackColor = Blue))
         Text("${(scale * 100).roundToInt()}%", style = MaterialTheme.typography.labelMedium, color = Muted, textAlign = TextAlign.End, modifier = Modifier.widthIn(min = 40.dp))
@@ -1203,117 +1232,41 @@ private fun LibrarySheet(graphs: List<SavedGraph>, onDismiss: () -> Unit, onActi
 }
 
 @Composable
-private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDismiss: () -> Unit, onAction: (CalculatorAction) -> Unit) {
-    val activeBounds = if (state.is3D) state.bounds3D else state.bounds
-    val appearance = if (state.is3D) state.appearance3D else state.appearance2D
-    val ranges = remember(state.is3D, activeBounds) {
-        with(activeBounds) { mutableStateListOf(xMin?.toString().orEmpty(), xMax?.toString().orEmpty(), yMin?.toString().orEmpty(), yMax?.toString().orEmpty(),
-            zMin?.toString().orEmpty(), zMax?.toString().orEmpty(), tMin.toString(), tMax.toString(), uMin.toString(), uMax.toString(), vMin.toString(), vMax.toString()) }
-    }
-    var showMore by remember { mutableStateOf(false) }
-    var showBounds by remember(state.is3D) { mutableStateOf(!state.is3D) }
-    var boundsError by remember { mutableStateOf<String?>(null) }
-    var precision by remember(state.precisionDigits) { mutableStateOf(state.precisionDigits.toString()) }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
-            Box(Modifier.matchParentSize().clickable(onClick = onDismiss))
-            Surface(Modifier.align(Alignment.TopEnd).padding(12.dp).widthIn(max = 400.dp).fillMaxWidth()
-                .heightIn(max = (maxHeight - 24.dp).coerceAtLeast(0.dp)),
-                shape = MaterialTheme.shapes.large, color = DemosColors.Paper, shadowElevation = 8.dp, border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
-                Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (!graphSettings) "App settings" else if (state.is3D) "3D graph settings" else "2D graph settings", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                DismissControl("Close settings", onClick = onDismiss)
-            }
-            HorizontalDivider(Modifier.padding(vertical = 10.dp))
-            if (graphSettings) {
-            SettingsCheck(if (state.is3D) "XY plane grid" else "Grid", if (state.is3D) state.showGrid3D else state.showGrid) { onAction(CalculatorAction.SetGrid(it)) }
-            SettingsCheck(if (state.is3D) "3D axes" else "Axes", if (state.is3D) state.showAxes3D else state.showAxes) { onAction(CalculatorAction.SetAxes(it)) }
-            SettingsCheck("Axis numbers", appearance.numbers) { onAction(CalculatorAction.SetAppearance(appearance.copy(numbers = it))) }
-            SettingsCheck("Axis labels", appearance.labels) { onAction(CalculatorAction.SetAppearance(appearance.copy(labels = it))) }
-            if (state.is3D) SettingsCheck("Reverse contrast", appearance.reverseContrast) { onAction(CalculatorAction.SetAppearance(appearance.copy(reverseContrast = it))) }
-            if (appearance.labels) repeat(if (state.is3D) 3 else 2) { axis ->
-                val label = listOf(appearance.xLabel, appearance.yLabel, appearance.zLabel)[axis]
-                OutlinedTextField(label, { text ->
-                    onAction(CalculatorAction.SetAppearance(when (axis) {
-                        0 -> appearance.copy(xLabel = text)
-                        1 -> appearance.copy(yLabel = text)
-                        else -> appearance.copy(zLabel = text)
-                    }))
-                }, label = { Text("${"XYZ"[axis]}-axis label") }, singleLine = true, shape = MaterialTheme.shapes.small,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 5.dp))
-            }
-            HorizontalDivider(Modifier.padding(vertical = 10.dp))
-            if (state.is3D) {
-                DisclosureHeader("All bounds", showBounds) { showBounds = !showBounds }
-                if (showBounds) BoundFieldPair("All", ranges[0], ranges[1],
-                    { value -> for (i in listOf(0, 2, 4)) ranges[i] = value },
-                    { value -> for (i in listOf(1, 3, 5)) ranges[i] = value })
-            } else Text("Viewing window", style = MaterialTheme.typography.titleSmall)
-            if (showBounds) {
-            Text("Leave both bounds blank for the default view.", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 4.dp, bottom = 7.dp))
-            repeat(if (state.is3D) 3 else 2) { axis ->
-                BoundFieldPair("${"xyz"[axis]}", ranges[axis * 2], ranges[axis * 2 + 1],
-                    { ranges[axis * 2] = it }, { ranges[axis * 2 + 1] = it })
-            }
-            boundsError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = DemosColors.Error, modifier = Modifier.padding(top = 5.dp)) }
-            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { onAction(CalculatorAction.SetBounds(GraphBounds())); boundsError = null }, shape = MaterialTheme.shapes.small) { Text("Reset bounds") }
-                Button(onClick = {
-                    val values = ranges.map { it.trim().takeIf(String::isNotEmpty)?.toDoubleOrNull() }
-                    val malformed = ranges.indices.any { ranges[it].isNotBlank() && (values[it] == null || values[it]?.isFinite() != true) }
-                    val missing = (0..2).any { (values[it * 2] == null) != (values[it * 2 + 1] == null) } || (6..11).any { values[it] == null }
-                    val unordered = (0..5).any { pair -> val a = values[pair * 2]; val b = values[pair * 2 + 1]; a != null && b != null && a >= b }
-                    val nonpositive = !state.is3D && ((appearance.logX && values[0] != null && values[0]!! <= 0.0) || (appearance.logY && values[2] != null && values[2]!! <= 0.0))
-                    if (nonpositive) boundsError = "Logarithmic axes require positive bounds."
-                    else if (malformed || missing || unordered) boundsError = "Enter finite minimum and maximum values, with minimum less than maximum."
-                    else {
-                        onAction(CalculatorAction.SetBounds(GraphBounds(values[0], values[1], values[2], values[3], values[4], values[5],
-                            values[6]!!, values[7]!!, values[8]!!, values[9]!!, values[10]!!, values[11]!!)))
-                        boundsError = null
+private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, visibleBounds: GraphBounds?, anchor: Rect?,
+    onDismiss: () -> Unit, onAction: (CalculatorAction) -> Unit, onResetBounds: () -> Unit) {
+    val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    val dismiss = { focusManager.clearFocus(); onDismiss() }
+    PlatformBackHandler(enabled = true) { dismiss() }
+    BoxWithConstraints(Modifier.fillMaxSize().imePadding().onGloballyPositioned { origin = it.positionInWindow() }) {
+        val anchorTop = anchor?.let { with(density) { (it.top - origin.y).toDp() } } ?: 0.dp
+        val anchorBottom = anchor?.let { with(density) { (it.bottom - origin.y).toDp() } } ?: 4.dp
+        val belowStart = (anchorBottom + 4.dp).coerceIn(0.dp, maxHeight)
+        val aboveEnd = (anchorTop - 4.dp).coerceIn(0.dp, maxHeight)
+        val below = maxHeight - belowStart >= aboveEnd
+        val topInset = if (below) belowStart else 8.dp
+        val bottomInset = if (below) 8.dp else maxHeight - aboveEnd
+        val availableHeight = (maxHeight - topInset - bottomInset).coerceAtLeast(0.dp)
+        val short = availableHeight < if (graphSettings && state.is3D) 384.dp else 344.dp
+        Surface(Modifier.align(if (below) Alignment.TopEnd else Alignment.BottomEnd)
+            .padding(start = 8.dp, end = 8.dp, top = topInset, bottom = bottomInset).widthIn(max = 360.dp).fillMaxWidth()
+            .semantics { contentDescription = "Settings panel" }
+            .heightIn(max = availableHeight),
+            shape = MaterialTheme.shapes.large, color = DemosColors.Paper, shadowElevation = 8.dp, border = androidx.compose.foundation.BorderStroke(1.dp, Border)) {
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                Column(Modifier.padding(10.dp).onPreviewKeyEvent {
+                    if (it.type == KeyEventType.KeyDown && it.key == Key.Escape) { dismiss(); true } else false
+                }) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (!graphSettings) "App settings" else if (state.is3D) "3D graph settings" else "2D graph settings",
+                            style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        DismissControl("Close settings", Modifier.size(32.dp), onClick = dismiss)
                     }
-                }, shape = MaterialTheme.shapes.small) { Text("Apply") }
-            }
-            }
-            HorizontalDivider(Modifier.padding(vertical = 6.dp))
-            DisclosureHeader("More options", showMore) { showMore = !showMore; if (showMore) showBounds = true }
-            if (showMore) {
-                if (!state.is3D) {
-                    Text("X-axis scale", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 6.dp))
-                    SettingsSegments("Linear", "Logarithmic", !appearance.logX) { onAction(CalculatorAction.SetAppearance(appearance.copy(logX = !it))) }
-                    Text("Y-axis scale", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 6.dp))
-                    SettingsSegments("Linear", "Logarithmic", !appearance.logY) { onAction(CalculatorAction.SetAppearance(appearance.copy(logY = !it))) }
-                    Text("Logarithmic axes display positive values in powers of 10.", fontSize = 11.sp, color = Muted)
-                }
-                Text("Parametric ranges", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 6.dp))
-                repeat(3) { parameter ->
-                    val index = 6 + parameter * 2
-                    BoundFieldPair("${"tuv"[parameter]}", ranges[index], ranges[index + 1], { ranges[index] = it }, { ranges[index + 1] = it })
-                }
-            }
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            Text("Angle measure", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 6.dp))
-            SettingsSegments("Radians", "Degrees", !state.degreeMode) { onAction(CalculatorAction.SetDegreeMode(!it)) }
-            } else {
-                Text("Default result format", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 6.dp))
-                SettingsSegments("Decimal", "Exact", state.defaultDecimal) { onAction(CalculatorAction.SetDefaultDecimal(it)) }
-                Text("Tap a result to switch formats. Symbolic answers stay exact.", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 5.dp))
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                KeyboardHeightControl(state.keyboardHeightScale) { onAction(CalculatorAction.SetKeyboardHeightScale(it)) }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                SettingRow("Complex mode", "Allow complex solutions", state.complexMode) { onAction(CalculatorAction.SetComplexMode(it)) }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text("Angle measure", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 6.dp))
-                SettingsSegments("Radians", "Degrees", !state.degreeMode) { onAction(CalculatorAction.SetDegreeMode(!it)) }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Row(Modifier.fillMaxWidth().padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(value = precision, onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) precision = it },
-                        label = { Text("Precision digits") }, supportingText = { Text("10–1000 digits") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, shape = MaterialTheme.shapes.small, textStyle = interfaceTextStyle(14.sp), modifier = Modifier.weight(1f))
-                    TextButton(onClick = { precision.toIntOrNull()?.takeIf { it in 10..1000 }?.let { onAction(CalculatorAction.SetPrecisionDigits(it)) } },
-                        enabled = (precision.toIntOrNull() ?: 0) in 10..1000, shape = MaterialTheme.shapes.small) { Text("Apply") }
-                }
-            }
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    if (graphSettings) GraphSettingsControls(state, visibleBounds, short, onAction) {
+                        focusManager.clearFocus(); onResetBounds()
+                    } else AppSettingsControls(state, short, onAction)
                 }
             }
         }
@@ -1321,45 +1274,210 @@ private fun SettingsSheet(state: CalculatorUiState, graphSettings: Boolean, onDi
 }
 
 @Composable
-private fun SettingsCheck(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(value = checked, role = Role.Checkbox, onValueChange = onChange).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = checked, onCheckedChange = null, modifier = Modifier.padding(end = 12.dp), colors = CheckboxDefaults.colors(checkedColor = Blue))
-        Text(label, style = MaterialTheme.typography.bodyLarge)
+private fun ColumnScope.GraphSettingsControls(state: CalculatorUiState, visibleBounds: GraphBounds?, short: Boolean,
+    onAction: (CalculatorAction) -> Unit, onResetBounds: () -> Unit) {
+    val appearance = if (state.is3D) state.appearance3D else state.appearance2D
+    val configured = if (state.is3D) state.bounds3D else state.bounds
+    val bounds = if (state.is3D || visibleBounds == null) configured else configured.copy(
+        xMin = visibleBounds.xMin, xMax = visibleBounds.xMax, yMin = visibleBounds.yMin, yMax = visibleBounds.yMax)
+    var showMore by remember(state.is3D) { mutableStateOf(false) }
+    var boundsEditorRevision by remember { mutableIntStateOf(0) }
+    if (!short) GraphVisibilityControls(state, appearance, onAction)
+    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+    Row(Modifier.fillMaxWidth().heightIn(min = 28.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(if (state.is3D) "Plot bounds" else "Viewing window", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+        TextButton(onClick = { boundsEditorRevision++; onResetBounds() }, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(28.dp)) { Text("Reset bounds", fontSize = 12.sp) }
+    }
+    key(state.is3D, boundsEditorRevision) { GraphBoundsControls(bounds, state.is3D, appearance, onAction) }
+    if (!short) SettingsChoice("Angle measure", "Radians", "Degrees", !state.degreeMode) { onAction(CalculatorAction.SetDegreeMode(!it)) }
+    DisclosureHeader("More options", showMore) { showMore = !showMore }
+    if (showMore) {
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (short) {
+                GraphVisibilityControls(state, appearance, onAction)
+                SettingsChoice("Angle measure", "Radians", "Degrees", !state.degreeMode) { onAction(CalculatorAction.SetDegreeMode(!it)) }
+            }
+            key(state.is3D, boundsEditorRevision) { GraphMoreOptions(state.is3D, bounds, appearance, onAction) }
+        }
+    }
+}
+
+@Composable
+private fun GraphVisibilityControls(state: CalculatorUiState, appearance: GraphAppearance, onAction: (CalculatorAction) -> Unit) {
+    Row(Modifier.fillMaxWidth()) {
+        SettingsCheck(if (state.is3D) "XY plane grid" else "Grid", if (state.is3D) state.showGrid3D else state.showGrid, Modifier.weight(1f)) { onAction(CalculatorAction.SetGrid(it)) }
+        SettingsCheck(if (state.is3D) "3D axes" else "Axes", if (state.is3D) state.showAxes3D else state.showAxes, Modifier.weight(1f)) { onAction(CalculatorAction.SetAxes(it)) }
+    }
+    Row(Modifier.fillMaxWidth()) {
+        SettingsCheck("Axis numbers", appearance.numbers, Modifier.weight(1f)) { onAction(CalculatorAction.SetAppearance(appearance.copy(numbers = it))) }
+        SettingsCheck("Axis labels", appearance.labels, Modifier.weight(1f)) { onAction(CalculatorAction.SetAppearance(appearance.copy(labels = it))) }
+    }
+    if (state.is3D) SettingsCheck("Reverse contrast", appearance.reverseContrast) { onAction(CalculatorAction.SetAppearance(appearance.copy(reverseContrast = it))) }
+}
+
+@Composable
+private fun GraphBoundsControls(bounds: GraphBounds, is3D: Boolean, appearance: GraphAppearance, onAction: (CalculatorAction) -> Unit) {
+    val values = listOf(bounds.xMin, bounds.xMax, bounds.yMin, bounds.yMax, bounds.zMin, bounds.zMax)
+    repeat(if (is3D) 3 else 2) { axis ->
+        BoundFieldPair("${"xyz"[axis]}", values[axis * 2], values[axis * 2 + 1],
+            positive = !is3D && if (axis == 0) appearance.logX else appearance.logY) { low, high ->
+            val updated = when (axis) {
+                0 -> bounds.copy(xMin = low, xMax = high)
+                1 -> bounds.copy(yMin = low, yMax = high)
+                else -> bounds.copy(zMin = low, zMax = high)
+            }
+            if (updated != bounds) onAction(CalculatorAction.SetBounds(updated))
+        }
+    }
+}
+
+@Composable
+private fun GraphMoreOptions(is3D: Boolean, bounds: GraphBounds, appearance: GraphAppearance, onAction: (CalculatorAction) -> Unit) {
+    if (appearance.labels) {
+        Text("Axis labels", style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(appearance.xLabel, appearance.yLabel, appearance.zLabel).take(if (is3D) 3 else 2).forEachIndexed { axis, label ->
+                CompactNumberField(label, { text ->
+                    onAction(CalculatorAction.SetAppearance(when (axis) {
+                        0 -> appearance.copy(xLabel = text)
+                        1 -> appearance.copy(yLabel = text)
+                        else -> appearance.copy(zLabel = text)
+                    }))
+                }, Modifier.weight(1f), label = "${"XYZ"[axis]}-axis label", keyboardType = KeyboardType.Text)
+            }
+        }
+    }
+    if (is3D) {
+        Text("All axes", style = MaterialTheme.typography.labelLarge)
+        BoundFieldPair("All", bounds.xMin, bounds.xMax) { low, high ->
+            onAction(CalculatorAction.SetBounds(bounds.copy(xMin = low, xMax = high, yMin = low, yMax = high, zMin = low, zMax = high)))
+        }
+    } else {
+        SettingsChoice("X-axis scale", "Linear", "Logarithmic", !appearance.logX) { onAction(CalculatorAction.SetAppearance(appearance.copy(logX = !it))) }
+        SettingsChoice("Y-axis scale", "Linear", "Logarithmic", !appearance.logY) { onAction(CalculatorAction.SetAppearance(appearance.copy(logY = !it))) }
+        Text("Logarithmic axes require positive bounds.", fontSize = 11.sp, color = Muted)
+    }
+    Text("Parametric ranges", style = MaterialTheme.typography.labelLarge)
+    val ranges = listOf(bounds.tMin, bounds.tMax, bounds.uMin, bounds.uMax, bounds.vMin, bounds.vMax)
+    repeat(3) { parameter ->
+        BoundFieldPair("${"tuv"[parameter]}", ranges[parameter * 2], ranges[parameter * 2 + 1], allowAuto = false) { low, high ->
+            if (low != null && high != null) onAction(CalculatorAction.SetBounds(when (parameter) {
+                0 -> bounds.copy(tMin = low, tMax = high)
+                1 -> bounds.copy(uMin = low, uMax = high)
+                else -> bounds.copy(vMin = low, vMax = high)
+            }))
+        }
+    }
+    Text("Leave both axis bounds blank for the default view.", fontSize = 11.sp, color = Muted)
+}
+
+@Composable
+private fun ColumnScope.AppSettingsControls(state: CalculatorUiState, short: Boolean, onAction: (CalculatorAction) -> Unit) {
+    var showMore by remember { mutableStateOf(false) }
+    SettingsChoice("Result format", "Decimal", "Exact", state.defaultDecimal) { onAction(CalculatorAction.SetDefaultDecimal(it)) }
+    if (!short) Text("Tap a result to switch formats. Symbolic answers stay exact.", fontSize = 11.sp, color = Muted)
+    SettingsChoice("Angle measure", "Radians", "Degrees", !state.degreeMode) { onAction(CalculatorAction.SetDegreeMode(!it)) }
+    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+    if (short) {
+        DisclosureHeader("More options", showMore) { showMore = !showMore }
+        if (showMore) Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) { AppDisplayControls(state, onAction) }
+    } else AppDisplayControls(state, onAction)
+}
+
+@Composable
+private fun AppDisplayControls(state: CalculatorUiState, onAction: (CalculatorAction) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        KeyboardHeightControl(state.keyboardHeightScale) { onAction(CalculatorAction.SetKeyboardHeightScale(it)) }
+        SettingsCheck("Complex mode · allow complex solutions", state.complexMode) { onAction(CalculatorAction.SetComplexMode(it)) }
+        DecimalPlacesControl(state.decimalPlaces) { onAction(CalculatorAction.SetDecimalPlaces(it)) }
+    }
+}
+
+@Composable
+private fun DecimalPlacesControl(places: Int, onChange: (Int) -> Unit) {
+    var input by remember { mutableStateOf(places.toString()) }
+    var focused by remember { mutableStateOf(false) }
+    LaunchedEffect(places) { if (!focused) input = places.toString() }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Decimal places", fontSize = 13.sp, modifier = Modifier.width(104.dp))
+        CompactNumberField(input, { value ->
+            if (value.length <= 4 && value.all(Char::isDigit)) {
+                input = value
+                value.toIntOrNull()?.takeIf { it in 0..1000 && it != places }?.let(onChange)
+            }
+        }, Modifier.weight(1f).semantics { contentDescription = "Decimal places" }, onFocus = { focused = it },
+            keyboardType = KeyboardType.Number, isError = (input.toIntOrNull() ?: -1) !in 0..1000)
+        Text("0–1000", fontSize = 11.sp, color = Muted)
+    }
+}
+
+@Composable
+private fun SettingsCheck(label: String, checked: Boolean, modifier: Modifier = Modifier, onChange: (Boolean) -> Unit) {
+    Row(modifier.fillMaxWidth().heightIn(min = 32.dp).toggleable(value = checked, role = Role.Checkbox, onValueChange = onChange), verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = checked, onCheckedChange = null, modifier = Modifier.padding(end = 6.dp).size(20.dp), colors = CheckboxDefaults.colors(checkedColor = Blue))
+        Text(label, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun SettingsChoice(title: String, first: String, second: String, firstSelected: Boolean, onSelect: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, fontSize = 13.sp, modifier = Modifier.width(104.dp))
+        Box(Modifier.weight(1f)) { SettingsSegments(first, second, firstSelected, onSelect) }
     }
 }
 
 @Composable
 private fun SettingsSegments(first: String, second: String, firstSelected: Boolean, onSelect: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(DemosColors.Surface)
-        .border(1.dp, Border, MaterialTheme.shapes.small).padding(4.dp).selectableGroup()) {
+        .border(1.dp, Border, MaterialTheme.shapes.small).padding(2.dp).selectableGroup()) {
         listOf(first to true, second to false).forEach { (label, selected) ->
             val active = firstSelected == selected
-            Box(Modifier.weight(1f).heightIn(min = 40.dp).clip(MaterialTheme.shapes.extraSmall)
+            Box(Modifier.weight(1f).heightIn(min = 28.dp).clip(MaterialTheme.shapes.extraSmall)
                 .background(if (active) DemosColors.BlueSoft else Color.Transparent)
-                .selectable(selected = active, role = Role.RadioButton, onClick = { onSelect(selected) }).padding(horizontal = 8.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
-                Text(label, color = if (active) Blue else Muted, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
+                .selectable(selected = active, role = Role.RadioButton, onClick = { onSelect(selected) }).padding(horizontal = 4.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
+                Text(label, color = if (active) Blue else Muted, fontSize = 12.sp, maxLines = 1, textAlign = TextAlign.Center)
             }
         }
     }
 }
 
 @Composable
-private fun BoundFieldPair(axis: String, minimum: String, maximum: String, onMin: (String) -> Unit, onMax: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(bottom = 5.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-        OutlinedTextField(value = minimum, onValueChange = onMin, label = { Text("$axis min") }, placeholder = { Text("Auto") },
-            singleLine = true, shape = MaterialTheme.shapes.small, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), textStyle = interfaceTextStyle(14.sp), modifier = Modifier.weight(1f))
-        OutlinedTextField(value = maximum, onValueChange = onMax, label = { Text("$axis max") }, placeholder = { Text("Auto") },
-            singleLine = true, shape = MaterialTheme.shapes.small, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), textStyle = interfaceTextStyle(14.sp), modifier = Modifier.weight(1f))
+private fun BoundFieldPair(axis: String, low: Double?, high: Double?, positive: Boolean = false, allowAuto: Boolean = true,
+    onChange: (Double?, Double?) -> Unit) {
+    var minimum by remember { mutableStateOf(settingsNumber(low)) }
+    var maximum by remember { mutableStateOf(settingsNumber(high)) }
+    var minFocused by remember { mutableStateOf(false) }
+    var maxFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(low) { if (!minFocused) minimum = settingsNumber(low) }
+    LaunchedEffect(high) { if (!maxFocused) maximum = settingsNumber(high) }
+    val parsedMin = minimum.trim().toDoubleOrNull()
+    val parsedMax = maximum.trim().toDoubleOrNull()
+    val automatic = allowAuto && minimum.isBlank() && maximum.isBlank()
+    val valid = automatic || (parsedMin != null && parsedMax != null && parsedMin.isFinite() && parsedMax.isFinite() &&
+        parsedMin < parsedMax && (!positive || parsedMin > 0.0))
+    fun update(first: String, last: String) {
+        minimum = first; maximum = last
+        val a = first.trim().toDoubleOrNull(); val b = last.trim().toDoubleOrNull()
+        if (allowAuto && first.isBlank() && last.isBlank()) onChange(null, null)
+        else if (a != null && b != null && a.isFinite() && b.isFinite() && a < b && (!positive || a > 0.0)) onChange(a, b)
+    }
+    Column {
+        Row(Modifier.fillMaxWidth().padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(axis, fontSize = 13.sp, modifier = Modifier.width(24.dp))
+            CompactNumberField(minimum, { update(it, maximum) }, Modifier.weight(1f).semantics { contentDescription = "$axis min" },
+                placeholder = if (allowAuto) "Auto" else "Min", onFocus = { minFocused = it }, isError = !valid)
+            Text("≤ $axis ≤", fontSize = 11.sp, color = Muted)
+            CompactNumberField(maximum, { update(minimum, it) }, Modifier.weight(1f).semantics { contentDescription = "$axis max" },
+                placeholder = if (allowAuto) "Auto" else "Max", onFocus = { maxFocused = it }, isError = !valid)
+        }
+        if (!valid) Text(if (positive) "Use positive, finite bounds with min < max." else "Use finite bounds with min < max.", fontSize = 11.sp, color = DemosColors.Error)
     }
 }
 
-@Composable
-private fun SettingRow(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { Text(title, fontSize = 16.sp); Text(detail, fontSize = 12.sp, color = Muted) }
-        Switch(checked = checked, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Blue))
-    }
-}
+private fun settingsNumber(value: Double?): String = value?.let {
+    if (it == it.toLong().toDouble()) it.toLong().toString() else "%.8g".format(java.util.Locale.ROOT, it)
+}.orEmpty()
 
 @Composable
 private fun HelpSheet(onDismiss: () -> Unit) {
@@ -1392,8 +1510,8 @@ private fun HelpSheet(onDismiss: () -> Unit) {
 private enum class IconKind { Folder, More, Wrench, Plus, Undo, Redo, Settings, Collapse, Expand, Delete, Backspace, Return, Speaker, Keyboard, Fullscreen, Export, ArrowLeft, ArrowRight }
 
 @Composable
-private fun ToolIcon(kind: IconKind, description: String, color: Color = Muted, onClick: () -> Unit, enabled: Boolean = true) {
-    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(48.dp).semantics { contentDescription = description }) {
+private fun ToolIcon(kind: IconKind, description: String, color: Color = Muted, onClick: () -> Unit, enabled: Boolean = true, modifier: Modifier = Modifier) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = modifier.size(48.dp).semantics { contentDescription = description }) {
         Box(Modifier.size(36.dp).clip(MaterialTheme.shapes.small).background(if (color == Blue) DemosColors.BlueSoft else Color.Transparent), contentAlignment = Alignment.Center) {
             CalcIcon(kind, if (enabled) color else DemosColors.Disabled, Modifier.size(22.dp))
         }

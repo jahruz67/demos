@@ -357,6 +357,11 @@ class CalculatorController(
             is CalculatorAction.SetPrecisionDigits -> {
                 rememberUndo(); _state.value = _state.value.copy(precisionDigits = action.digits.coerceIn(10, 1000), dirty = true); changed()
             }
+            is CalculatorAction.SetDecimalPlaces -> {
+                val places = action.places.coerceIn(0, 1000)
+                if (_state.value.decimalPlaces == places) return
+                rememberUndo(); _state.value = _state.value.copy(decimalPlaces = places, dirty = true); changed()
+            }
             is CalculatorAction.SetComplexMode -> {
                 rememberUndo(); _state.value = _state.value.copy(complexMode = action.enabled, dirty = true); changed()
             }
@@ -526,10 +531,11 @@ class CalculatorController(
                         if (compiled.variables.isNotEmpty() && compiled.variables.all { it in parameters }) compiled.evaluate(parameters).takeIf { it.isFinite() }?.let { CasResult(row.text, TableRegression.number(it)) } else null
                     }.getOrNull() else null
                     val isSlider = runCatching { MathSyntax.definition(row.text)?.name?.let { name -> snapshot.sliders.any { it.name == name } } == true }.getOrDefault(false)
-                    val fast = if (isSlider) CasResult(row.text, "") else numeric ?: FastArithmetic.evaluate(row.text, snapshot.precisionDigits) ?: incompleteResult(row.text)
-                    val context = if (fast != null) listOf("Digits:=${snapshot.precisionDigits}") else
+                    val calculationDigits = maxOf(snapshot.precisionDigits, snapshot.decimalPlaces + 16)
+                    val fast = if (isSlider) CasResult(row.text, "") else numeric ?: FastArithmetic.evaluate(row.text, snapshot.decimalPlaces) ?: incompleteResult(row.text)
+                    val context = if (fast != null) listOf("Digits:=$calculationDigits") else
                         listOf("angle_radian:=${if (snapshot.degreeMode) 0 else 1}",
-                            "complex_mode:=${if (snapshot.complexMode) 1 else 0}", "Digits:=${snapshot.precisionDigits}") +
+                            "complex_mode:=${if (snapshot.complexMode) 1 else 0}", "Digits:=$calculationDigits") +
                             tableDefinitions + definitions.filter { it.first != row.id }.map { it.second } +
                             regressions.filter { it.first != row.id }.map { it.second }
                     Triple(row, EvaluationKey(row.text, context), fast)
@@ -657,6 +663,7 @@ class CalculatorController(
         appearance2D = _state.value.appearance2D, appearance3D = _state.value.appearance3D,
         parameters = mapOf("C" to integrationConstant),
         precisionDigits = _state.value.precisionDigits,
+        decimalPlaces = _state.value.decimalPlaces,
         complexMode = _state.value.complexMode,
         viewBounds = with(_state.value.bounds) { mapOf("xMin" to xMin, "xMax" to xMax, "yMin" to yMin, "yMax" to yMax, "zMin" to zMin, "zMax" to zMax, "tMin" to tMin, "tMax" to tMax, "uMin" to uMin, "uMax" to uMax, "vMin" to vMin, "vMax" to vMax).filterValues { it != null }.mapValues { it.value!! } },
         viewBounds3D = with(_state.value.bounds3D) { mapOf("xMin" to xMin, "xMax" to xMax, "yMin" to yMin, "yMax" to yMax, "zMin" to zMin, "zMax" to zMax, "tMin" to tMin, "tMax" to tMax, "uMin" to uMin, "uMax" to uMax, "vMin" to vMin, "vMax" to vMax).filterValues { it != null }.mapValues { it.value!! } },
@@ -682,6 +689,7 @@ class CalculatorController(
             showAxes3D = doc.showAxes3D ?: if (doc.is3D) doc.showAxes else true,
             appearance2D = doc.appearance2D, appearance3D = doc.appearance3D,
             precisionDigits = doc.precisionDigits, complexMode = doc.complexMode,
+            decimalPlaces = doc.decimalPlaces.coerceIn(0, 1000),
             bounds = with(doc.viewBounds) { GraphBounds(get("xMin"), get("xMax"), get("yMin"), get("yMax"), get("zMin"), get("zMax"), get("tMin") ?: -10.0, get("tMax") ?: 10.0, get("uMin") ?: -5.0, get("uMax") ?: 5.0, get("vMin") ?: -5.0, get("vMax") ?: 5.0) },
             bounds3D = with(doc.viewBounds3D ?: if (doc.is3D) doc.viewBounds else emptyMap()) { GraphBounds(get("xMin"), get("xMax"), get("yMin"), get("yMax"), get("zMin"), get("zMax"), get("tMin") ?: -10.0, get("tMax") ?: 10.0, get("uMin") ?: -5.0, get("uMax") ?: 5.0, get("vMin") ?: -5.0, get("vMax") ?: 5.0) },
             dirty = dirty, canUndo = undo.isNotEmpty(), canRedo = redo.isNotEmpty(), statusMessage = null, sliderSettings = doc.sliderSettings, tableFits = emptyMap(), documentRevision = _state.value.documentRevision + 1, tableFitting = emptySet())

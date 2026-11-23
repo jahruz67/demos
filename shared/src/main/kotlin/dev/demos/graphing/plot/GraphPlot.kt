@@ -38,6 +38,7 @@ import dev.demos.graphing.ui.rememberImageLoader
 import dev.demos.graphing.ui.parseImageData
 import dev.demos.graphing.ui.DemosColors
 import dev.demos.graphing.ui.GraphControl
+import dev.demos.graphing.ui.GraphBounds
 import dev.demos.graphing.ui.interfaceTextStyle
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -85,6 +86,7 @@ private fun NativePlot2D(expressions:List<PlotExpression>,settings:PlotSettings,
     var viewWidth by rememberSaveable {mutableDoubleStateOf(20.0)}
     var viewHeightOverride by rememberSaveable {mutableStateOf<Double?>(null)}
     var appliedBounds by rememberSaveable {mutableStateOf<List<Double?>?>(null)}
+    var appliedResetCounter by rememberSaveable {mutableIntStateOf(renderState.boundsResetCounter)}
     var size by remember {mutableStateOf(IntSize(1,1))}
     val previousBounds = remember { arrayOfNulls<Rect>(1) }
     var trace by remember {mutableStateOf<Offset?>(null)}
@@ -129,9 +131,12 @@ private fun NativePlot2D(expressions:List<PlotExpression>,settings:PlotSettings,
         viewWidth=xb?.let {it.second-it.first}?:20.0
         viewHeightOverride=yb?.let {it.second-it.first}
     }
-    LaunchedEffect(settings.xMin,settings.xMax,settings.yMin,settings.yMax,settings.appearance.logX,settings.appearance.logY) {
-        val bounds=listOf(settings.xMin,settings.xMax,settings.yMin,settings.yMax,if(settings.appearance.logX) 1.0 else 0.0,if(settings.appearance.logY) 1.0 else 0.0)
-        if(appliedBounds!=bounds) {reset2D();appliedBounds=bounds}
+    val configuredBounds2D=listOf(settings.xMin,settings.xMax,settings.yMin,settings.yMax,if(settings.appearance.logX) 1.0 else 0.0,if(settings.appearance.logY) 1.0 else 0.0)
+    val boundsResetCounter=renderState.boundsResetCounter
+    LaunchedEffect(configuredBounds2D,boundsResetCounter) {
+        if(appliedBounds!=configuredBounds2D || appliedResetCounter!=boundsResetCounter) {
+            reset2D();appliedBounds=configuredBounds2D;appliedResetCounter=boundsResetCounter
+        }
     }
     val plotInput=PlotInput(expressions,settings)
     val compiledPlot by produceState<CompiledPlot?>(null,plotInput) {
@@ -152,7 +157,14 @@ private fun NativePlot2D(expressions:List<PlotExpression>,settings:PlotSettings,
     }
     val ready=compiledPlot?.input==plotInput && samplingInput!=null && sampledInput==samplingInput &&
         loadedImages?.uris==imageUris && zoom2DTarget==null && size.width>1 && size.height>1
-    SideEffect {renderState.ready=ready}
+    SideEffect {
+        renderState.ready=ready
+        if(size.width>1 && size.height>1 && appliedBounds==configuredBounds2D && appliedResetCounter==boundsResetCounter) {
+            renderState.visibleBounds2D=GraphBounds(
+                xMin=axisValue(view.left,settings.appearance.logX),xMax=axisValue(view.right,settings.appearance.logX),
+                yMin=axisValue(view.bottom,settings.appearance.logY),yMax=axisValue(view.top,settings.appearance.logY))
+        }
+    }
     DisposableEffect(renderState) {onDispose {renderState.invalidate()}}
     val latestGeometry by rememberUpdatedState(geometry)
     val latestView by rememberUpdatedState(view)
@@ -466,6 +478,6 @@ private fun validBounds(low:Double?,high:Double?):Pair<Double,Double>? =
 private fun number(v:Double):String {
     if(v==0.0) return "0"
     return if(abs(v)>=1e7 || abs(v)<1e-4) String.format(Locale.US,"%.3g",v)
-    else if(abs(v-round(v))<1e-7) String.format(Locale.US,"%.0f",v)
+    else if(abs(v-round(v))<1e-7) round(v).toLong().toString()
     else String.format(Locale.US,"%.4f",v).trimEnd('0').trimEnd('.')
 }

@@ -61,6 +61,20 @@ class DisplayPreferencesTest {
         assertTrue(restoredModel("decimal").state.value.defaultDecimal)
     }
 
+    @Test fun decimalPlacesAllowZeroAndSmallValuesWithoutReducingCalculationPrecision() {
+        val model = restoredModel("decimal-places")
+        val precision = model.state.value.precisionDigits
+        model.onAction(CalculatorAction.SetDecimalPlaces(0))
+        assertEquals(0, model.state.value.decimalPlaces)
+        model.onAction(CalculatorAction.SetDecimalPlaces(2))
+        assertEquals(2, model.state.value.decimalPlaces)
+        assertEquals(precision, model.state.value.precisionDigits)
+        model.onAction(CalculatorAction.SetDecimalPlaces(-1))
+        assertEquals(0, model.state.value.decimalPlaces)
+        model.onAction(CalculatorAction.SetDecimalPlaces(1001))
+        assertEquals(1000, model.state.value.decimalPlaces)
+    }
+
     @Test fun keyboardHeightRejectsNonfiniteValuesAndClampsToItsRange() {
         val model = restoredModel("height")
         model.onAction(CalculatorAction.SetKeyboardHeightScale(10f))

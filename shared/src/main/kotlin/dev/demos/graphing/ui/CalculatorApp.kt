@@ -32,6 +32,11 @@ internal fun CalculatorApp(
     DemosTheme {
         Box(modifier.fillMaxSize().background(DemosColors.Header)) {
             CalculatorScreen(state, controller::onAction, showGraphControls = showGraphControls,
+                visibleBounds = { renderState.visibleBounds2D },
+                onResetBounds = {
+                    controller.onAction(CalculatorAction.SetBounds(GraphBounds()))
+                    renderState.resetBounds(state.is3D)
+                },
                 onOpenLibrary = { controller.loadLibrary() }) { _, plotModifier ->
                 val is3D = graphState.is3D
                 val bounds = if (is3D) graphState.bounds3D else graphState.bounds

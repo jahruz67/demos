@@ -33,6 +33,7 @@ data class GraphDocument(
     val viewBounds3D: Map<String, Double>? = null,
     val appearance2D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(),
     val appearance3D: dev.demos.graphing.plot.GraphAppearance = dev.demos.graphing.plot.GraphAppearance(),
+    val decimalPlaces: Int = 3,
 )
 
 class GraphRepository(private val directory: File) {
